@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+build/
+captures/
+.env
+*.sqlite
+.psn-token.json
+
+# Instance-specific compose file (use docker-compose.example.yml as the template)
+docker-compose.yml
+
+# Internal SDD design/plan artifacts (kept local, not published)
+docs/superpowers/

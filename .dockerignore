@@ -1,0 +1,21 @@
+# Keep the build context small and avoid shipping secrets to the daemon.
+.git
+.gitignore
+.github
+.venv
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.superpowers/
+
+# Never send local secrets or downloaded media into the build context.
+.env
+captures/
+*.sqlite
+*.part
+
+# Not needed to build the image.
+tests/
+docs/

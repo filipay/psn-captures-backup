@@ -1,0 +1,19 @@
+services:
+  psn-captures-backup:
+    build: .
+    image: psn-captures-backup:latest
+    container_name: psn-captures-backup
+    restart: unless-stopped
+    # Run as the user that owns the bind mount below. The image defaults to uid
+    # 10001, which cannot write to a host-owned folder ("unable to open database
+    # file"). Find yours with `id -u` and `id -g`.
+    user: "1000:1000"
+    env_file: .env
+    volumes:
+      # Host folder captures are written to (container path is /captures).
+      - /path/to/psn-captures:/captures
+    environment:
+      PSN_OUTPUT_DIR: /captures
+      PSN_STATE_FILE: /captures/.psn-captures-state.sqlite
+      PSN_TOKEN_FILE: /captures/.psn-token.json
+      TZ: UTC
