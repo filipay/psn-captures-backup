@@ -3,15 +3,18 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-import httpx
 import logging
+
+import httpx
 
 from .models import Capture, CaptureParseError
 from .output import write_atomic
 
 log = logging.getLogger(__name__)
 
-STORE_TITLE_URL = "https://store.playstation.com/store/api/chihiro/00_09_000/titlecontainer/GB/en/999"
+STORE_TITLE_URL = (
+    "https://store.playstation.com/store/api/chihiro/00_09_000/titlecontainer/GB/en/999"
+)
 
 PSN_BASE_URL = (
     "https://m.np.playstation.com/api/gameMediaService/v2/c2s"
