@@ -35,6 +35,7 @@ class Settings:
     log_level: str = "INFO"
     flat: bool = False
     post_download_script: Path | None = None
+    post_download_debounce_seconds: float = 0.0
     dry_run: bool = False
     json_log: bool = False
 
@@ -61,8 +62,11 @@ class Settings:
             max_concurrency = int(values.get("PSN_MAX_CONCURRENCY", "2"))
             upload_concurrency = int(values.get("PSN_UPLOAD_CONCURRENCY", "2"))
             upload_queue_limit = int(values.get("PSN_UPLOAD_QUEUE_LIMIT", "4"))
+            post_download_debounce_seconds = float(
+                values.get("PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS", "0")
+            )
         except ValueError as exc:
-            raise ConfigError(f"concurrency settings must be integers: {exc}") from exc
+            raise ConfigError(f"concurrency/debounce settings must be numeric: {exc}") from exc
         if poll_interval <= 0:
             raise ConfigError("PSN_POLL_INTERVAL must be positive")
         if max_concurrency <= 0:
@@ -71,6 +75,8 @@ class Settings:
             raise ConfigError("PSN_UPLOAD_CONCURRENCY must be positive")
         if upload_queue_limit <= 0:
             raise ConfigError("PSN_UPLOAD_QUEUE_LIMIT must be positive")
+        if post_download_debounce_seconds < 0:
+            raise ConfigError("PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS must not be negative")
 
         script = values.get("PSN_POST_DOWNLOAD_SCRIPT")
         return cls(
@@ -86,6 +92,7 @@ class Settings:
             include_videos=_parse_bool(values.get("PSN_INCLUDE_VIDEOS", "true")),
             log_level=values.get("PSN_LOG_LEVEL", "INFO").upper(),
             post_download_script=Path(script).expanduser() if script else None,
+            post_download_debounce_seconds=post_download_debounce_seconds,
         )
 
     def with_overrides(self, **overrides: Any) -> Settings:

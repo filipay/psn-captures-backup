@@ -108,11 +108,12 @@ Environment variables (also readable from a `.env` file):
 | `PSN_POLL_INTERVAL` | `21600` (6h) | Seconds between `daemon` syncs. |
 | `PSN_MAX_CONCURRENCY` | `2` | Parallel downloads. |
 | `PSN_UPLOAD_CONCURRENCY` | `2` | Maximum number of post-download hooks running at once. |
-| `PSN_UPLOAD_QUEUE_LIMIT` | `4` | Maximum number of queued or running hooks; downloads wait for capacity. |
+| `PSN_UPLOAD_QUEUE_LIMIT` | `4` | Maximum number of queued or running hook batches; downloads wait for capacity. |
+| `PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS` | `0` | Quiet period before post-download hooks run as one batch; `0` preserves per-download hooks. |
 | `PSN_INCLUDE_IMAGES` | `true` | Download screenshots. |
 | `PSN_INCLUDE_VIDEOS` | `true` | Download video clips. |
 | `PSN_LOG_LEVEL` | `INFO` | Log verbosity. |
-| `PSN_POST_DOWNLOAD_SCRIPT` | — | Optional hook run after each successful download. |
+| `PSN_POST_DOWNLOAD_SCRIPT` | — | Optional hook run after successful downloads. The hook receives one or more paths when debounce is enabled. |
 
 Precedence is CLI flag > environment/`.env` > built-in default.
 
@@ -136,6 +137,7 @@ Per-command flags override the environment:
 - `--upload-queue-limit N`
 - `--dry-run` (`sync`)
 - `--post-download-script PATH`
+- `--post-download-debounce-seconds N`
 - `--flat`
 - `--json-log`
 - `--verbose`
@@ -158,16 +160,22 @@ By default each game gets its own folder:
 
 ```
 <output-dir>/<Sanitized Game Title>/<YYYY-MM-DD>_<capture-id>.<ext>
+
+When the PSN capture title contains an exact `YYYYMMDDHHMMSS` suffix, the full
+capture timestamp is used instead:
+<output-dir>/<Sanitized Game Title>/<YYYY-MM-DD>_<HH-MM-SS>_<capture-id>.<ext>
 ```
 
 For example:
 
 ```
-captures/Example Game/2025-10-11_psn88a578fc0d3848b1a41142f75a3d62ad.jpg
+captures/Example Game/2025-10-11_14-30-25_psn88a578fc0d3848b1a41142f75a3d62ad.jpg
 ```
 
-- `<YYYY-MM-DD>` comes from the capture's PSN `uploadDate` (UTC), so names are
-  stable across re-runs.
+- When PSN's capture title has an exact 14-digit timestamp (for example
+  `Valheim_20260926235351`), that timestamp is used in the filename as
+  `YYYY-MM-DD_HH-MM-SS`. Otherwise the filename uses the capture's PSN
+  `uploadDate` date (UTC).
 - Extensions are chosen from the file type: `jpg`/`png` for images, `mp4` for
   videos. Video captures use the direct MP4 `downloadUrl`, not the HLS playlist.
 - Game titles are sanitized for filesystem safety (path separators, control
@@ -183,14 +191,27 @@ captures/Example Game/2025-10-11_psn88a578fc0d3848b1a41142f75a3d62ad.jpg
 ## Post-download hook
 
 Set `PSN_POST_DOWNLOAD_SCRIPT=/path/to/hook.sh` (or `--post-download-script`) to
-run an executable after each successful download. The script is invoked as:
+run an executable after successful downloads. By default the hook runs once per
+download. Set `PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS` (or
+`--post-download-debounce-seconds`) to a positive value to collect captures
+until that many seconds have passed without another successful download, then
+invoke the hook once with all captured paths:
 
 ```bash
-/path/to/hook.sh /absolute/path/to/downloaded/file
+/path/to/hook.sh /absolute/path/to/file-a.jpg /absolute/path/to/file-b.mp4
 ```
 
-Hooks run concurrently in a separate worker pool after the state row is written,
-so a slow upload does not prevent other captures from downloading.
+This is useful for downstream tools that scan a directory: a burst of captures
+can trigger one scan instead of one scan per file. The default `0` keeps the
+existing one-hook-per-download behavior.
+
+Hook batches run concurrently in a separate worker pool after state rows are
+written, so a slow hook does not prevent other captures from downloading.
+`PSN_UPLOAD_CONCURRENCY` controls how many hook batches run at once, while
+`PSN_UPLOAD_QUEUE_LIMIT` bounds queued plus running hook batches. When that
+limit is reached, the sync waits for a hook slot before accepting another batch.
+The sync command waits for all submitted hooks before exiting. Hook failures are
+logged and do not abort the sync; failed hooks are not automatically retried.
 
 When PSN does not provide `sceTitleName`, the client first uses the capture's
 `title` field. For capture titles ending in an exact 14-digit timestamp, that
@@ -199,11 +220,6 @@ If neither title field provides a usable name, the client uses
 `sceUserAccountId` and `sceTitleId` with PSN's authenticated game-list
 endpoint to resolve the title. Title lookups are cached for the duration of the
 sync, and failures safely fall back to `Unknown Game`.
-`PSN_UPLOAD_CONCURRENCY` controls how many hooks run at once, while
-`PSN_UPLOAD_QUEUE_LIMIT` bounds queued plus running hooks. When that limit is
-reached, the sync waits for a hook slot before submitting another one. The sync
-command still waits for all submitted hooks before exiting. Hook failures are
-logged and do not abort the sync; failed hooks are not automatically retried.
 
 ## Immich integration
 
@@ -214,9 +230,8 @@ name (the built-in `--folder-as-tags` tags with a root-prefixed path such as
 `psn-captures/Example Game`, not the bare game name).
 
 See [docs/immich.md](docs/immich.md) for the full recipe: install/pin, config
-file (API key off the command line), uploading the existing backlog, the
-systemd timer that keeps it in sync automatically, and the album-per-game
-alternative.
+file (API key off the command line), backlog upload, event-driven post-download
+uploads, and the album-per-game alternative.
 
 ## Caveats
 

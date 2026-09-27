@@ -20,6 +20,7 @@ def test_from_env_defaults() -> None:
     assert settings.max_concurrency == 2
     assert settings.upload_concurrency == 2
     assert settings.upload_queue_limit == 4
+    assert settings.post_download_debounce_seconds == 0
     assert settings.upload_concurrency == 2
     assert settings.upload_queue_limit == 4
     assert settings.include_images is True
@@ -36,3 +37,16 @@ def test_with_overrides_ignores_none() -> None:
     updated = settings.with_overrides(flat=True, log_level=None)
     assert updated.flat is True
     assert updated.log_level == settings.log_level
+
+
+
+def test_from_env_parses_post_download_debounce() -> None:
+    settings = Settings.from_env(
+        {"NPSSO": "abc", "PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS": "10.5"}
+    )
+    assert settings.post_download_debounce_seconds == 10.5
+
+
+def test_from_env_rejects_negative_post_download_debounce() -> None:
+    with pytest.raises(ConfigError, match="PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS"):
+        Settings.from_env({"NPSSO": "abc", "PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS": "-1"})

@@ -8,7 +8,7 @@ from typing import Any
 UGC_IMAGE = 1
 UGC_VIDEO = 2
 
-_CAPTURE_TITLE_TIMESTAMP = re.compile(r"^(.*)_\d{14}$")
+_CAPTURE_TITLE_TIMESTAMP = re.compile(r"^(.*)_(\d{14})$")
 
 
 class CaptureParseError(ValueError):
@@ -36,6 +36,21 @@ def _capture_title(item: dict[str, Any]) -> str:
     return "Unknown Game"
 
 
+def _capture_date(item: dict[str, Any]) -> datetime | None:
+    title = _first_nonempty_string(item, "title")
+    if not title:
+        return None
+    match = _CAPTURE_TITLE_TIMESTAMP.fullmatch(title)
+    if not match:
+        return None
+    try:
+        # PSN's title timestamp has no timezone information. Preserve the
+        # wall-clock value exactly as reported by the console.
+        return datetime.strptime(match.group(2), "%Y%m%d%H%M%S")  # noqa: DTZ007
+    except ValueError:
+        return None
+
+
 def _parse_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
@@ -50,6 +65,7 @@ class Capture:
     ugc_type: int
     game_title: str
     upload_date: datetime
+    capture_date: datetime | None = None
     title_id: str | None = None
     screenshot_url: str | None = None
     download_url: str | None = None
@@ -87,6 +103,7 @@ class Capture:
             id=capture_id,
             ugc_type=ugc_type,
             game_title=_capture_title(item),
+            capture_date=_capture_date(item),
             title_id=item.get("sceTitleId") if isinstance(item.get("sceTitleId"), str) else None,
             upload_date=upload_date.astimezone(UTC),
             screenshot_url=item.get("screenshotUrl"),

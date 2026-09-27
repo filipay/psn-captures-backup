@@ -30,7 +30,10 @@ def extension_for(capture: Capture) -> str:
 
 def destination(output_dir: Path, capture: Capture, ext: str, *, flat: bool = False) -> Path:
     folder = output_dir if flat else output_dir / sanitize_title(capture.game_title)
-    stamp = capture.upload_date.strftime("%Y-%m-%d")
+    if capture.capture_date is not None:
+        stamp = capture.capture_date.strftime("%Y-%m-%d_%H-%M-%S")
+    else:
+        stamp = capture.upload_date.strftime("%Y-%m-%d")
     return folder / f"{stamp}_{capture.id}{ext}"
 
 
