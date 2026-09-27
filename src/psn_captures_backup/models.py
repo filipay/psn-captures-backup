@@ -33,6 +33,7 @@ class Capture:
     id: str
     ugc_type: int
     game_title: str
+    title_id: str | None
     upload_date: datetime
     screenshot_url: str | None = None
     download_url: str | None = None
@@ -66,13 +67,14 @@ class Capture:
         upload_date = _parse_datetime(item.get("uploadDate"))
         if upload_date is None:
             raise CaptureParseError("'uploadDate' is required")
-        title = _first_nonempty_string(
-            item, "sceTitleName", "titleName", "gameTitle", "title"
-        ) or "Unknown Game"
+        title = item.get("sceTitleName")
+        if not isinstance(title, str) or not title.strip():
+            title = "Unknown Game"
         return cls(
             id=capture_id,
             ugc_type=ugc_type,
             game_title=title,
+            title_id=item.get("sceTitleId") if isinstance(item.get("sceTitleId"), str) else None,
             upload_date=upload_date.astimezone(UTC),
             screenshot_url=item.get("screenshotUrl"),
             download_url=item.get("downloadUrl"),
