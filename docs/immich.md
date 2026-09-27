@@ -61,14 +61,14 @@ Precedence is **CLI flag > environment > config file > default**.
 
 ## Recommended recipe: one album + per-game tags
 
-immich-go is invoked **once per game folder** so the tag can be set explicitly
+Uploads use `--concurrent-tasks=4` (a global flag, placed before `upload`) to process up to four tasks concurrently. Adjust the value based on host and server capacity.\n\nimmich-go is invoked **once per game folder** so the tag can be set explicitly
 to the folder name (deterministic — it does not depend on how immich-go
 interprets nested paths):
 
 ```bash
 CAPTURES=/path/to/psn-captures
 for d in "$CAPTURES"/*/; do
-  immich-go --config /etc/immich-go/immich-go.toml \
+  immich-go --config /etc/immich-go/immich-go.toml --concurrent-tasks=4 \
     upload from-folder --no-ui --on-errors continue --pause-immich-jobs=false \
     --into-album "PlayStation Captures" \
     --tag "$(basename "$d")" \
@@ -83,7 +83,7 @@ done
 - `--pause-immich-jobs=false` avoids pausing/resuming server jobs on every
   invocation (relevant for frequent runs; with this flag the API key does not
   need `job.*` permissions).
-- `--recursive` is the default (`true`) and need not be passed.
+- `--recursive` is the default (`true`) and need not be passed.\n- `--concurrent-tasks=4` enables concurrent processing; it is a root-level flag and must appear before `upload`.
 
 ### Uploading the existing backlog
 
@@ -94,7 +94,7 @@ running the same loop above once without `--dry-run`:
 CAPTURES=/path/to/psn-captures
 
 # --dry-run is a GLOBAL flag, so it goes before the subcommand
-immich-go --config /etc/immich-go/immich-go.toml --dry-run \
+immich-go --config /etc/immich-go/immich-go.toml --dry-run --concurrent-tasks=4 \
   upload from-folder --no-ui --pause-immich-jobs=false \
   --into-album "PlayStation Captures" \
   --tag "Example Game" \
@@ -134,7 +134,7 @@ CAPTURES=/path/to/psn-captures
 
 for d in "$CAPTURES"/*/; do
   [ -d "$d" ] || continue
-  immich-go --config "$CONFIG" \
+  immich-go --config "$CONFIG" --concurrent-tasks=4 \
     upload from-folder --no-ui --on-errors continue --pause-immich-jobs=false \
     --into-album "PlayStation Captures" \
     --tag "$(basename "$d")" \
