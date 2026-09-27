@@ -61,7 +61,9 @@ Precedence is **CLI flag > environment > config file > default**.
 
 ## Recommended recipe: one album + per-game tags
 
-Uploads use `--concurrent-tasks=4` (a global flag, placed before `upload`) to process up to four tasks concurrently. Adjust the value based on host and server capacity.\n\nimmich-go is invoked **once per game folder** so the tag can be set explicitly
+Uploads use `--concurrent-tasks=4` (a global flag, placed before `upload`) to process up to four tasks concurrently. Adjust the value based on host and server capacity.
+
+immich-go is invoked **once per game folder** so the tag can be set explicitly
 to the folder name (deterministic — it does not depend on how immich-go
 interprets nested paths):
 
@@ -83,7 +85,8 @@ done
 - `--pause-immich-jobs=false` avoids pausing/resuming server jobs on every
   invocation (relevant for frequent runs; with this flag the API key does not
   need `job.*` permissions).
-- `--recursive` is the default (`true`) and need not be passed.\n- `--concurrent-tasks=4` enables concurrent processing; it is a root-level flag and must appear before `upload`.
+- `--recursive` is the default (`true`) and need not be passed.
+- `--concurrent-tasks=4` enables concurrent processing; it is a root-level flag and must appear before `upload`.
 
 ### Uploading the existing backlog
 
@@ -121,20 +124,91 @@ instead of relying on `--folder-as-tags`. If you prefer one album **per game**
 rather than tags, use `--folder-as-album=FOLDER` instead (album title = folder
 name); do not combine it with `--into-album`.
 
-## Automate it (systemd timer)
+## Automate it with the post-download hook
 
-Save the wrapper as `/usr/local/bin/psn-captures-to-immich` and `chmod +x`:
+The backup already knows exactly when a capture has finished downloading, so a
+filesystem watcher or polling timer is unnecessary. Use the built-in
+`PSN_POST_DOWNLOAD_SCRIPT` hook and enable its debounce mode:
+
+```env
+PSN_POST_DOWNLOAD_SCRIPT=/usr/local/bin/psn-captures-to-immich
+PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS=10
+```
+
+`PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS` is a quiet period: every successful
+download resets the timer. Once no new capture has finished for 10 seconds, the
+hook is invoked once with all captures from that burst. Set it to `0` to retain
+the original one-hook-per-download behavior.
+
+### Immich hook script
+
+Because the hook can receive several files, group them by game folder and scan
+each affected game once. Save this as
+`/usr/local/bin/psn-captures-to-immich` and `chmod +x` it:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 CONFIG=/etc/immich-go/immich-go.toml
+QUEUE=$(mktemp)
+trap 'rm -f "$QUEUE"' EXIT
+
+for file in "$@"; do
+  dirname "$file"
+done | sort -u > "$QUEUE"
+
+while IFS= read -r game_dir; do
+  [ -d "$game_dir" ] || continue
+  immich-go --config "$CONFIG" --concurrent-tasks=4 \
+    upload from-folder --no-ui --on-errors continue --pause-immich-jobs=false \
+    --into-album "PlayStation Captures" \
+    --tag "$(basename "$game_dir")" \
+    "$game_dir"
+done < "$QUEUE"
+```
+
+The hook invokes immich-go once for each affected game folder, so ten captures
+that finish close together do not cause ten full folder scans.
+
+### Docker
+
+The post-download hook runs **inside the backup container**. If you keep the
+static `immich-go` binary and its config on the host, mount those into the
+backup container along with the hook script:
+
+```yaml
+services:
+  psn-captures-backup:
+    # ...existing settings...
+    env_file: .env
+    environment:
+      PSN_POST_DOWNLOAD_SCRIPT: /usr/local/bin/psn-captures-to-immich
+      PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS: 10
+    volumes:
+      - /path/to/psn-captures:/captures
+      - /usr/local/bin/immich-go:/usr/local/bin/immich-go:ro
+      - /etc/immich-go:/etc/immich-go:ro
+      - /usr/local/bin/psn-captures-to-immich:/usr/local/bin/psn-captures-to-immich:ro
+```
+
+The container user must be able to execute the binary, read the Immich config
+file, and read the capture files. Keep the Immich API key in the config file
+rather than putting it on the command line.
+
+No `inotify-tools` package or systemd timer is required for this setup.
+
+### One-time backlog upload
+
+Debouncing only affects newly downloaded captures. Upload an existing backlog
+once with the normal per-game loop:
+
+```bash
 CAPTURES=/path/to/psn-captures
 
 for d in "$CAPTURES"/*/; do
   [ -d "$d" ] || continue
-  immich-go --config "$CONFIG" --concurrent-tasks=4 \
+  immich-go --config /etc/immich-go/immich-go.toml --concurrent-tasks=4 \
     upload from-folder --no-ui --on-errors continue --pause-immich-jobs=false \
     --into-album "PlayStation Captures" \
     --tag "$(basename "$d")" \
@@ -142,47 +216,7 @@ for d in "$CAPTURES"/*/; do
 done
 ```
 
-`/etc/systemd/system/immich-go-psn.service` — `flock` prevents overlapping runs:
-
-```ini
-[Unit]
-Description=Upload PSN captures to Immich
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-# Run as the user that owns the capture files (needed when <captures> is a bind
-# mount). Uncomment and set:
-# User=youruser
-# Group=yourgroup
-ExecStart=/usr/bin/flock -n /run/immich-go-psn.lock /usr/local/bin/psn-captures-to-immich
-```
-
-`/etc/systemd/system/immich-go-psn.timer`:
-
-```ini
-[Unit]
-Description=Periodic PSN captures upload to Immich
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=10min
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now immich-go-psn.timer
-systemctl list-timers immich-go-psn.timer
-```
-
-Versus running it by hand, the timer keeps new captures flowing without any
-manual step; see the README for why the container itself must also run as a uid
-able to write the mounted folder.
+Because dedupe is checksum-based, repeating this command is safe.
 
 ## Idempotency, exit codes, and safety
 
