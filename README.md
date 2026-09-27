@@ -160,16 +160,22 @@ By default each game gets its own folder:
 
 ```
 <output-dir>/<Sanitized Game Title>/<YYYY-MM-DD>_<capture-id>.<ext>
+
+When the PSN capture title contains an exact `YYYYMMDDHHMMSS` suffix, the full
+capture timestamp is used instead:
+<output-dir>/<Sanitized Game Title>/<YYYY-MM-DD>_<HH-MM-SS>_<capture-id>.<ext>
 ```
 
 For example:
 
 ```
-captures/Example Game/2025-10-11_psn88a578fc0d3848b1a41142f75a3d62ad.jpg
+captures/Example Game/2025-10-11_14-30-25_psn88a578fc0d3848b1a41142f75a3d62ad.jpg
 ```
 
-- `<YYYY-MM-DD>` comes from the capture's PSN `uploadDate` (UTC), so names are
-  stable across re-runs.
+- When PSN's capture title has an exact 14-digit timestamp (for example
+  `Valheim_20260926235351`), that timestamp is used in the filename as
+  `YYYY-MM-DD_HH-MM-SS`. Otherwise the filename uses the capture's PSN
+  `uploadDate` date (UTC).
 - Extensions are chosen from the file type: `jpg`/`png` for images, `mp4` for
   videos. Video captures use the direct MP4 `downloadUrl`, not the HLS playlist.
 - Game titles are sanitized for filesystem safety (path separators, control
