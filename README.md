@@ -214,11 +214,6 @@ If neither title field provides a usable name, the client uses
 `sceUserAccountId` and `sceTitleId` with PSN's authenticated game-list
 endpoint to resolve the title. Title lookups are cached for the duration of the
 sync, and failures safely fall back to `Unknown Game`.
-`PSN_UPLOAD_CONCURRENCY` controls how many hooks run at once, while
-`PSN_UPLOAD_QUEUE_LIMIT` bounds queued plus running hooks. When that limit is
-reached, the sync waits for a hook slot before submitting another one. The sync
-command still waits for all submitted hooks before exiting. Hook failures are
-logged and do not abort the sync; failed hooks are not automatically retried.
 
 ## Immich integration
 
