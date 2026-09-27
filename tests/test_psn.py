@@ -14,6 +14,16 @@ IMAGE = {
     "screenshotUrl": "https://cdn.example/screenshot.jpg",
     "fileType": "JPEG",
 }
+UNKNOWN_GAME = {
+    "id": "psn3",
+    "ugcType": 1,
+    "sceTitleName": None,
+    "sceTitleId": "PPSA28824_00",
+    "uploadDate": "2025-10-13T00:00:00Z",
+    "screenshotUrl": "https://cdn.example/valheim.jpg",
+    "fileType": "JPEG",
+}
+
 VIDEO = {
     "id": "psn2",
     "ugcType": 2,
@@ -36,7 +46,7 @@ def test_list_captures_follows_cursor_and_captures_cookies() -> None:
             "limit": 1,
         },
         {
-            "ugcDocument": [VIDEO],
+            "ugcDocument": [VIDEO, UNKNOWN_GAME],
             "nextCursorMark": "-1",
             "limit": 1,
         },
@@ -44,7 +54,10 @@ def test_list_captures_follows_cursor_and_captures_cookies() -> None:
     seen_params = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if "cdn.example" in str(request.url):
+        url = str(request.url)
+        if "titlecontainer" in url:
+            return httpx.Response(200, json={"name": "Valheim"})
+        if "cdn.example" in url:
             return httpx.Response(200, content=b"media")
         seen_params.append(dict(request.url.params))
         headers = {
@@ -56,7 +69,8 @@ def test_list_captures_follows_cursor_and_captures_cookies() -> None:
 
     client = PsnClient("TOKEN", client=_client(handler))
     captures = client.list_captures()
-    assert [c.id for c in captures] == ["psn1", "psn2"]
+    assert [c.id for c in captures] == ["psn1", "psn2", "psn3"]
+    assert captures[2].game_title == "Valheim"
     assert seen_params[0]["includeTokenizedUrls"] == "true"
     assert seen_params[1]["nextCursorMark"] == "PAGE2"
     assert client.cloudfront_cookies == "CloudFront-Policy=abc"
