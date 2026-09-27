@@ -143,7 +143,7 @@ def test_sync_runs_hooks_concurrently(tmp_path: Path, monkeypatch) -> None:
     release = Event()
     result_holder = {}
 
-    def hook(_script: Path, _path: Path) -> None:
+    def hook(_script: Path, _paths: list[Path]) -> None:
         nonlocal active, max_active
         with lock:
             active += 1
@@ -191,7 +191,7 @@ def test_sync_applies_upload_backpressure(tmp_path: Path, monkeypatch) -> None:
     fake_psn = FakePsn([_capture("a"), _capture("b"), _capture("c")])
     result_holder = {}
 
-    def hook(_script: Path, _path: Path) -> None:
+    def hook(_script: Path, _paths: list[Path]) -> None:
         started.set()
         assert release.wait(timeout=2)
 
@@ -219,3 +219,43 @@ def test_sync_applies_upload_backpressure(tmp_path: Path, monkeypatch) -> None:
     worker.join(timeout=2)
     assert not worker.is_alive()
     assert result_holder["result"].downloaded == 3
+
+
+
+def test_sync_debounces_post_download_hooks(tmp_path: Path, monkeypatch) -> None:
+    settings = _settings(
+        tmp_path,
+        max_concurrency=2,
+        upload_concurrency=2,
+        upload_queue_limit=4,
+        post_download_script=tmp_path / "hook.sh",
+        post_download_debounce_seconds=0.05,
+    )
+    calls: list[list[Path]] = []
+    called = Event()
+
+    def hook(_script: Path, paths: list[Path]) -> None:
+        calls.append(paths)
+        called.set()
+
+    monkeypatch.setattr("psn_captures_backup.sync._run_hook", hook)
+
+    state = StateStore(settings.state_file)
+    try:
+        result = sync(
+            settings,
+            tokens=FakeTokens(),
+            psn=FakePsn([_capture("a"), _capture("b"), _capture("c")]),
+            state=state,
+        )
+    finally:
+        state.close()
+
+    assert result.downloaded == 3
+    assert called.wait(timeout=1)
+    assert len(calls) == 1
+    assert {path.name for path in calls[0]} == {
+        "2025-10-11_a.jpg",
+        "2025-10-11_b.jpg",
+        "2025-10-11_c.jpg",
+    }
