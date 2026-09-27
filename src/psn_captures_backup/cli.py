@@ -68,7 +68,9 @@ def _parser() -> argparse.ArgumentParser:
         cmd.add_argument("--token-file")
         cmd.add_argument("--flat", action="store_true", default=None)
         cmd.add_argument("--post-download-script")
-        cmd.add_argument("--max-concurrency", type=int)\n        cmd.add_argument("--upload-concurrency", type=int)\n        cmd.add_argument("--upload-queue-limit", type=int)
+        cmd.add_argument("--max-concurrency", type=int)
+        cmd.add_argument("--upload-concurrency", type=int)
+        cmd.add_argument("--upload-queue-limit", type=int)
         cmd.add_argument("--json-log", action="store_true", default=None)
         cmd.add_argument("--verbose", action="store_true")
         if name in ("sync", "daemon", "list"):
