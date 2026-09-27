@@ -28,6 +28,25 @@ VIDEO_ITEM = {
     "sourceOfMedia": "s3",
 }
 
+VALHEIM_ITEM = {
+    "id": "psn-valheim",
+    "ugcType": 2,
+    "sceTitleName": None,
+    "sceTitleId": "PPSA28824_00",
+    "title": "Valheim_20260926235351",
+    "uploadDate": "2026-09-26T22:55:12.145Z",
+    "downloadUrl": "https://cdn.example/valheim.mp4",
+    "fileType": "WEBM",
+}
+
+UNTIMESTAMPED_TITLE_ITEM = {
+    "id": "psn-custom-title",
+    "ugcType": 1,
+    "sceTitleName": None,
+    "title": "My Game",
+    "uploadDate": "2026-09-26T00:00:00Z",
+}
+
 
 def test_parse_image() -> None:
     capture = Capture.from_api(IMAGE_ITEM)
@@ -43,6 +62,17 @@ def test_parse_video() -> None:
     capture = Capture.from_api(VIDEO_ITEM)
     assert capture.is_video
     assert capture.download_url.endswith(".mp4")
+
+
+def test_parse_title_fallback_from_capture_title() -> None:
+    capture = Capture.from_api(VALHEIM_ITEM)
+    assert capture.game_title == "Valheim"
+    assert capture.title_id == "PPSA28824_00"
+
+
+def test_capture_title_without_timestamp_is_preserved() -> None:
+    capture = Capture.from_api(UNTIMESTAMPED_TITLE_ITEM)
+    assert capture.game_title == "My Game"
 
 
 def test_missing_id_raises() -> None:
