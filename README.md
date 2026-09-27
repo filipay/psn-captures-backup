@@ -27,13 +27,13 @@ a day.
 
 ### Docker (build locally)
 
-There is no published image yet, so build it from this repository. From the
+A prebuilt image is published to GitHub Container Registry (GHCR). From the
 repository root:
 
 ```bash
 cp .env.example .env
 # edit .env and set NPSSO (see below)
-docker build -t psn-captures-backup:latest .
+docker pull ghcr.io/filipay/psn-captures-backup:latest
 
 docker run -d --name psn-captures-backup \
   --env-file .env \
@@ -45,11 +45,11 @@ docker run -d --name psn-captures-backup \
 ```
 
 Or edit the example compose file (set the bind-mount path and the `user:`) and
-let compose build for you:
+let Compose pull the published image:
 
 ```bash
 cp .env.example .env
-docker compose -f docker-compose.example.yml up -d --build
+docker compose -f docker-compose.example.yml up -d
 ```
 
 Replace `/path/to/psn-captures` with the host folder captures should be written
@@ -106,7 +106,11 @@ Environment variables (also readable from a `.env` file):
 | `PSN_STATE_FILE` | `<output>/.psn-captures-state.sqlite` | State DB path. |
 | `PSN_TOKEN_FILE` | `<output>/.psn-token.json` | Persisted refresh token (secret, written `0600`). |
 | `PSN_POLL_INTERVAL` | `21600` (6h) | Seconds between `daemon` syncs. |
-| `PSN_MAX_CONCURRENCY` | `2` | Parallel downloads. |\n| `PSN_UPLOAD_CONCURRENCY` | `2` | Maximum number of post-download hooks running at once. |\n| `PSN_UPLOAD_QUEUE_LIMIT` | `4` | Maximum number of queued or running hooks; downloads wait for capacity. |
+| `PSN_MAX_CONCURRENCY` | `2` | Parallel downloads. |
+| `PSN_UPLOAD_CONCURRENCY` | `2` | Maximum number of post-download hooks running at once. |
+| `PSN_UPLOAD_QUEUE_LIMIT` | `4` | Maximum number of queued or running hooks; downloads wait for capacity. |
+| `PSN_UPLOAD_CONCURRENCY` | `2` | Maximum number of post-download hooks running at once. |
+| `PSN_UPLOAD_QUEUE_LIMIT` | `4` | Maximum number of queued or running hooks; downloads wait for capacity. |
 | `PSN_INCLUDE_IMAGES` | `true` | Download screenshots. |
 | `PSN_INCLUDE_VIDEOS` | `true` | Download video clips. |
 | `PSN_LOG_LEVEL` | `INFO` | Log verbosity. |
@@ -129,7 +133,11 @@ Per-command flags override the environment:
 - `--state-file PATH`
 - `--token-file PATH`
 - `--no-images` / `--no-videos` (`sync`, `list`)
-- `--max-concurrency N`\n- `--upload-concurrency N`\n- `--upload-queue-limit N`
+- `--max-concurrency N`
+- `--upload-concurrency N`
+- `--upload-queue-limit N`
+- `--upload-concurrency N`
+- `--upload-queue-limit N`
 - `--dry-run` (`sync`)
 - `--post-download-script PATH`
 - `--flat`
@@ -185,10 +193,13 @@ run an executable after each successful download. The script is invoked as:
 /path/to/hook.sh /absolute/path/to/downloaded/file
 ```
 
-The hook runs once per downloaded file on the main thread, after the state row
-is written. Failures are logged and do not abort the sync. This is the extension
-point for users who want something other than a folder (for example, a direct
-API upload).
+Hooks run concurrently in a separate worker pool after the state row is written,
+so a slow upload does not prevent other captures from downloading.
+`PSN_UPLOAD_CONCURRENCY` controls how many hooks run at once, while
+`PSN_UPLOAD_QUEUE_LIMIT` bounds queued plus running hooks. When that limit is
+reached, the sync waits for a hook slot before submitting another one. The sync
+command still waits for all submitted hooks before exiting. Hook failures are
+logged and do not abort the sync; failed hooks are not automatically retried.
 
 ## Immich integration
 
