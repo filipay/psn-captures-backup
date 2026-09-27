@@ -92,6 +92,7 @@ class Settings:
             include_videos=_parse_bool(values.get("PSN_INCLUDE_VIDEOS", "true")),
             log_level=values.get("PSN_LOG_LEVEL", "INFO").upper(),
             post_download_script=Path(script).expanduser() if script else None,
+            post_download_debounce_seconds=post_download_debounce_seconds,
         )
 
     def with_overrides(self, **overrides: Any) -> Settings:
