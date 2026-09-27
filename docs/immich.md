@@ -224,8 +224,8 @@ Because dedupe is checksum-based, repeating this command is safe.
   filename/size; existing assets are skipped by default. Interrupted uploads
   resume safely, so re-running after each sync is a no-op for unchanged files.
 - There is **no persistent local state** for `from-folder`: each run re-walks
-  the tree and rebuilds an in-memory index of server assets. Occasional overlap
-  is handled by the `flock` in the service above.
+  the tree and rebuilds an in-memory index of server assets. The backup's hook
+  batching avoids launching a second scan for every capture in a burst.
 - Exit codes: `0` success, `1` error. Use `--no-ui` for non-interactive runs;
   add `--log-file /var/log/immich-go/upload.log` if you want a persistent log.
 - `--overwrite` (default `false`) forces replacement of server assets with the
