@@ -18,6 +18,8 @@ def test_from_env_defaults() -> None:
     assert settings.token_file == Path("/tmp/out/.psn-token.json")
     assert settings.poll_interval == 21600
     assert settings.max_concurrency == 2
+    assert settings.upload_concurrency == 2
+    assert settings.upload_queue_limit == 4
     assert settings.include_images is True
     assert settings.include_videos is True
 
