@@ -98,7 +98,9 @@ def _settings_for(args: argparse.Namespace) -> Settings:
         "token_file": _path("token_file"),
         "flat": getattr(args, "flat", None),
         "post_download_script": _path("post_download_script"),
-        "max_concurrency": getattr(args, "max_concurrency", None),\n        "upload_concurrency": getattr(args, "upload_concurrency", None),\n        "upload_queue_limit": getattr(args, "upload_queue_limit", None),
+        "max_concurrency": getattr(args, "max_concurrency", None),
+        "upload_concurrency": getattr(args, "upload_concurrency", None),
+        "upload_queue_limit": getattr(args, "upload_queue_limit", None),
         "json_log": getattr(args, "json_log", None),
         "dry_run": getattr(args, "dry_run", None),
     }
@@ -112,7 +114,11 @@ def _settings_for(args: argparse.Namespace) -> Settings:
     max_concurrency = overrides.get("max_concurrency")
     if isinstance(max_concurrency, int) and max_concurrency <= 0:
         raise ConfigError("--max-concurrency must be positive")
-    for key in ("upload_concurrency", "upload_queue_limit"):\n        value = overrides.get(key)\n        if isinstance(value, int) and value <= 0:\n            raise ConfigError(f"--{key.replace(chr(95), chr(45))} must be positive")\n    interval = getattr(args, "interval", None)
+    for key in ("upload_concurrency", "upload_queue_limit"):
+        value = overrides.get(key)
+        if isinstance(value, int) and value <= 0:
+            raise ConfigError(f"--{key.replace(chr(95), chr(45))} must be positive")
+    interval = getattr(args, "interval", None)
     if isinstance(interval, int) and interval <= 0:
         raise ConfigError("--interval must be positive")
 
