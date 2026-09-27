@@ -70,7 +70,7 @@ def test_write_atomic_cleans_up_on_error(tmp_path: Path) -> None:
 def test_destination_uses_capture_timestamp(tmp_path: Path) -> None:
     from datetime import datetime
 
-    capture = _capture(capture_date=datetime(2026, 9, 26, 23, 53, 51))
+    capture = _capture(capture_date=datetime(2026, 9, 26, 23, 53, 51))  # noqa: DTZ001
     path = destination(tmp_path, capture, ".webm")
     assert path == (
         tmp_path
