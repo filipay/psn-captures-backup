@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,8 +44,10 @@ def _already_downloaded(state: StateStore, capture: Capture) -> bool:
 
 def _run_hook(script: Path, path: Path) -> None:
     try:
-        subprocess.run([str(script), str(path)], check=False, timeout=300)
-    except OSError as exc:
+        completed = subprocess.run([str(script), str(path)], check=False, timeout=300)
+        if completed.returncode:
+            log.warning("post-download hook exited with status %s for %s", completed.returncode, path)
+    except (OSError, subprocess.TimeoutExpired) as exc:
         log.warning("post-download hook failed for %s: %s", path, exc)
 
 
@@ -88,13 +90,17 @@ def sync(
                 continue
             pending.append(capture)
 
-        with ThreadPoolExecutor(max_workers=settings.max_concurrency) as pool:
-            futures = {
-                pool.submit(_download_one, psn, settings, capture): capture  # type: ignore[arg-type]
+        with (
+            ThreadPoolExecutor(max_workers=settings.max_concurrency) as download_pool,
+            ThreadPoolExecutor(max_workers=settings.upload_concurrency) as upload_pool,
+        ):
+            downloads = {
+                download_pool.submit(_download_one, psn, settings, capture): capture  # type: ignore[arg-type]
                 for capture in pending
             }
-            for future in as_completed(futures):
-                capture = futures[future]
+            uploads: set[Future[None]] = set()
+            for future in as_completed(downloads):
+                capture = downloads[future]
                 try:
                     dest, sha256, size = future.result()
                 except (PsnError, OSError) as exc:
@@ -106,7 +112,14 @@ def sync(
                 result.downloaded += 1
                 log.info("downloaded %s -> %s", capture.id, dest)
                 if settings.post_download_script:
-                    _run_hook(settings.post_download_script, dest)
+                    # Bound queued + running hooks; wait for a slot before submitting.
+                    while len(uploads) >= settings.upload_queue_limit:
+                        done, uploads = wait(uploads, return_when=FIRST_COMPLETED)
+                        for completed in done:
+                            completed.result()
+                    uploads.add(upload_pool.submit(_run_hook, settings.post_download_script, dest))
+            for future in uploads:
+                future.result()
     finally:
         if owns_state:
             state.close()
