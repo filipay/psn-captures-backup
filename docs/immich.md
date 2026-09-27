@@ -61,7 +61,9 @@ Precedence is **CLI flag > environment > config file > default**.
 
 ## Recommended recipe: one album + per-game tags
 
-Uploads use `--concurrent-tasks=4` (a global flag, placed before `upload`) to process up to four tasks concurrently. Adjust the value based on host and server capacity.\n\nimmich-go is invoked **once per game folder** so the tag can be set explicitly
+Uploads use `--concurrent-tasks=4` (a global flag, placed before `upload`) to process up to four tasks concurrently. Adjust the value based on host and server capacity.
+
+immich-go is invoked **once per game folder** so the tag can be set explicitly
 to the folder name (deterministic — it does not depend on how immich-go
 interprets nested paths):
 
@@ -121,9 +123,26 @@ instead of relying on `--folder-as-tags`. If you prefer one album **per game**
 rather than tags, use `--folder-as-album=FOLDER` instead (album title = folder
 name); do not combine it with `--into-album`.
 
-## Automate it (systemd timer)
+## Automate it (systemd + inotify watcher)
 
-Save the wrapper as `/usr/local/bin/psn-captures-to-immich` and `chmod +x`:
+immich-go does not provide a built-in folder-watch mode, so the simplest
+event-driven setup is to use Linux's `inotify` facility to wake a long-running
+systemd service when a new capture appears. This avoids a fixed polling timer
+and typically starts the Immich upload within a few seconds.
+
+Install `inotify-tools` on the host:
+
+Arch Linux:
+```bash
+sudo pacman -S inotify-tools
+```
+
+Debian/Ubuntu:
+```bash
+sudo apt install inotify-tools
+```
+
+Save the watcher as `/usr/local/bin/psn-captures-to-immich-watch` and `chmod +x`:
 
 ```bash
 #!/usr/bin/env bash
@@ -131,10 +150,140 @@ set -euo pipefail
 
 CONFIG=/etc/immich-go/immich-go.toml
 CAPTURES=/path/to/psn-captures
+DEBOUNCE_SECONDS=3
+
+declare -A pending=()
+
+queue_path() {
+  local path=$1
+
+  # Only react to completed media files. PSN writes to .part and then
+  # atomically renames the completed file into place.
+  [ -f "$path" ] || return
+  case "$path" in
+    *.part|*/.*) return
+  esac
+
+  local rel game_dir
+  rel="${path#"$CAPTURES"/}"
+
+  # The first path component is the game folder. Ignore root-level files.
+  [[ "$rel" == */* ]] || return
+
+  game_dir="$CAPTURES/${rel%%/*}"
+  pending["$game_dir"]=1
+}
+
+upload_pending() {
+  local game_dir
+
+  for game_dir in "${!pending[@]}"; do
+    [ -d "$game_dir" ] || continue
+
+    # Serialize this with any manual backlog run. Concurrency is handled
+    # inside immich-go rather than by starting competing scans.
+    flock /run/immich-go-psn.lock \
+      immich-go --config "$CONFIG" --concurrent-tasks=4 \
+      upload from-folder --no-ui --on-errors continue --pause-immich-jobs=false \
+      --into-album "PlayStation Captures" \
+      --tag "$(basename "$game_dir")" \
+      "$game_dir"
+  done
+
+  pending=()
+}
+
+inotifywait -m -r \
+  -e moved_to,close_write \
+  --format '%w%f\0' \
+  "$CAPTURES" |
+while IFS= read -r -d '' path; do
+  queue_path "$path"
+
+  # Debounce bursts of captures. New events reset the quiet period.
+  while IFS= read -r -d '' -t "$DEBOUNCE_SECONDS" path; do
+    queue_path "$path"
+  done
+
+  upload_pending
+done
+```
+
+Create `/etc/systemd/system/immich-go-psn-watch.service`:
+
+```ini
+[Unit]
+Description=Watch PSN captures and upload them to Immich
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/psn-captures-to-immich-watch
+Restart=on-failure
+RestartSec=5
+
+# Run as the user that can read the capture tree and immich-go config.
+# Omit these lines to run as root:
+# User=youruser
+# Group=yourgroup
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable the watcher:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now immich-go-psn-watch.service
+systemctl status immich-go-psn-watch.service
+journalctl -u immich-go-psn-watch.service -f
+```
+
+If you previously used the 10-minute timer, disable it so the two mechanisms
+do not both scan the library:
+
+```bash
+sudo systemctl disable --now immich-go-psn.timer
+```
+
+### Why this is preferable to a per-file trigger
+
+The PSN backup writes each capture atomically (`.part` -> final filename), so
+the watcher reacts to the completed file rather than trying to upload a partial
+download.
+
+The watcher deliberately **does not start immich-go for every event**. It waits
+for a short quiet period, groups changed files by game folder, then runs one
+`from-folder` scan for each affected game. immich-go's checksum-based dedupe
+makes re-scanning the folder safe.
+
+This preserves the explicit per-game `--tag` behavior from the manual recipe.
+`--concurrent-tasks=4` controls concurrency inside each immich-go run; the
+watcher processes affected game folders serially, avoiding competing scans.
+
+For a large capture library, `inotify` can hit the kernel's per-user watch
+limit. If the service reports that it cannot add watches, check:
+
+```bash
+sysctl fs.inotify.max_user_watches
+```
+
+and increase it with a persistent sysctl setting if necessary.
+
+### One-time backlog upload
+
+The watcher only reacts to new filesystem events, so upload the existing backlog
+once with the normal per-game loop:
+
+```bash
+CAPTURES=/path/to/psn-captures
 
 for d in "$CAPTURES"/*/; do
   [ -d "$d" ] || continue
-  immich-go --config "$CONFIG" --concurrent-tasks=4 \
+  flock /run/immich-go-psn.lock \
+    immich-go --config /etc/immich-go/immich-go.toml --concurrent-tasks=4 \
     upload from-folder --no-ui --on-errors continue --pause-immich-jobs=false \
     --into-album "PlayStation Captures" \
     --tag "$(basename "$d")" \
@@ -142,47 +291,8 @@ for d in "$CAPTURES"/*/; do
 done
 ```
 
-`/etc/systemd/system/immich-go-psn.service` — `flock` prevents overlapping runs:
-
-```ini
-[Unit]
-Description=Upload PSN captures to Immich
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-# Run as the user that owns the capture files (needed when <captures> is a bind
-# mount). Uncomment and set:
-# User=youruser
-# Group=yourgroup
-ExecStart=/usr/bin/flock -n /run/immich-go-psn.lock /usr/local/bin/psn-captures-to-immich
-```
-
-`/etc/systemd/system/immich-go-psn.timer`:
-
-```ini
-[Unit]
-Description=Periodic PSN captures upload to Immich
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=10min
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now immich-go-psn.timer
-systemctl list-timers immich-go-psn.timer
-```
-
-Versus running it by hand, the timer keeps new captures flowing without any
-manual step; see the README for why the container itself must also run as a uid
-able to write the mounted folder.
+The `flock` keeps a manual backlog upload and the watcher from running
+simultaneously.
 
 ## Idempotency, exit codes, and safety
 
