@@ -253,10 +253,11 @@ Because dedupe is checksum-based, repeating this command is safe.
   was renamed `--server-errors` → `--on-errors` (v0.30.0); concurrency moved to
   the root command and was renamed `--concurrent-uploads` → `--concurrent-tasks`;
   config-file support landed in v0.29.0.
-- Filenames are `<YYYY-MM-DD>_<capture-id>.<ext>`. immich-go normally takes the
-  capture date from embedded EXIF/video metadata first; the filename is only a
-  fallback, and its documented `--date-from-name` pattern expects a time
-  component, so it may not parse. Check with `--dry-run` if dates look wrong.
+- Filenames use `<YYYY-MM-DD>_<capture-id>.<ext>` when no capture timestamp is
+  available. When the PSN capture title contains an exact `YYYYMMDDHHMMSS`
+  timestamp, the filename becomes `<YYYY-MM-DD>_<HH-MM-SS>_<capture-id>.<ext>`.
+  This gives immich-go a timestamped filename fallback when the media itself
+  has no creation metadata, allowing the asset to be placed chronologically.
 - Immich removed `deviceAssetId`/`deviceId` in v3; dedupe is checksum-based, so
   repeated uploads of the same files are no-ops.
 - The recommended recipe has been exercised end-to-end against a live Immich
