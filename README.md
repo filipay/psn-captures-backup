@@ -25,7 +25,7 @@ a day.
 
 ## Install
 
-### Docker (build locally)
+### Docker
 
 A prebuilt image is published to GitHub Container Registry (GHCR). From the
 repository root:
@@ -109,8 +109,6 @@ Environment variables (also readable from a `.env` file):
 | `PSN_MAX_CONCURRENCY` | `2` | Parallel downloads. |
 | `PSN_UPLOAD_CONCURRENCY` | `2` | Maximum number of post-download hooks running at once. |
 | `PSN_UPLOAD_QUEUE_LIMIT` | `4` | Maximum number of queued or running hooks; downloads wait for capacity. |
-| `PSN_UPLOAD_CONCURRENCY` | `2` | Maximum number of post-download hooks running at once. |
-| `PSN_UPLOAD_QUEUE_LIMIT` | `4` | Maximum number of queued or running hooks; downloads wait for capacity. |
 | `PSN_INCLUDE_IMAGES` | `true` | Download screenshots. |
 | `PSN_INCLUDE_VIDEOS` | `true` | Download video clips. |
 | `PSN_LOG_LEVEL` | `INFO` | Log verbosity. |
@@ -134,8 +132,6 @@ Per-command flags override the environment:
 - `--token-file PATH`
 - `--no-images` / `--no-videos` (`sync`, `list`)
 - `--max-concurrency N`
-- `--upload-concurrency N`
-- `--upload-queue-limit N`
 - `--upload-concurrency N`
 - `--upload-queue-limit N`
 - `--dry-run` (`sync`)
