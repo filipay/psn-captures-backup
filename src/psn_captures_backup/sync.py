@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -94,32 +94,59 @@ def sync(
             ThreadPoolExecutor(max_workers=settings.max_concurrency) as download_pool,
             ThreadPoolExecutor(max_workers=settings.upload_concurrency) as upload_pool,
         ):
-            downloads = {
-                download_pool.submit(_download_one, psn, settings, capture): capture  # type: ignore[arg-type]
-                for capture in pending
-            }
+            pending_downloads = iter(pending)
+            downloads: dict[Future[tuple[Path, str, int]], Capture] = {}
             uploads: set[Future[None]] = set()
-            for future in as_completed(downloads):
-                capture = downloads[future]
+
+            def submit_download() -> None:
                 try:
-                    dest, sha256, size = future.result()
-                except (PsnError, OSError) as exc:
-                    log.warning("download failed for %s: %s", capture.id, exc)
-                    state.record_failed(capture, str(exc))
-                    result.failed += 1
-                    continue
-                state.record_downloaded(capture, dest, sha256, size)
-                result.downloaded += 1
-                log.info("downloaded %s -> %s", capture.id, dest)
-                if settings.post_download_script:
-                    # Bound queued + running hooks; wait for a slot before submitting.
-                    while len(uploads) >= settings.upload_queue_limit:
-                        done, uploads = wait(uploads, return_when=FIRST_COMPLETED)
-                        for completed in done:
-                            completed.result()
-                    uploads.add(upload_pool.submit(_run_hook, settings.post_download_script, dest))
-            for future in uploads:
-                future.result()
+                    capture = next(pending_downloads)
+                except StopIteration:
+                    return
+                future = download_pool.submit(
+                    _download_one, psn, settings, capture  # type: ignore[arg-type]
+                )
+                downloads[future] = capture
+
+            for _ in range(min(settings.max_concurrency, len(pending))):
+                submit_download()
+
+            while downloads or uploads:
+                if downloads:
+                    done_downloads, _ = wait(downloads, return_when=FIRST_COMPLETED)
+                    for future in done_downloads:
+                        capture = downloads.pop(future)
+                        try:
+                            dest, sha256, size = future.result()
+                        except (PsnError, OSError) as exc:
+                            log.warning("download failed for %s: %s", capture.id, exc)
+                            state.record_failed(capture, str(exc))
+                            result.failed += 1
+                        else:
+                            state.record_downloaded(capture, dest, sha256, size)
+                            result.downloaded += 1
+                            log.info("downloaded %s -> %s", capture.id, dest)
+
+                            if settings.post_download_script:
+                                while len(uploads) >= settings.upload_queue_limit:
+                                    done_uploads, _ = wait(
+                                        uploads, return_when=FIRST_COMPLETED
+                                    )
+                                    uploads.difference_update(done_uploads)
+                                    for completed in done_uploads:
+                                        completed.result()
+                                uploads.add(
+                                    upload_pool.submit(
+                                        _run_hook, settings.post_download_script, dest
+                                    )
+                                )
+
+                        submit_download()
+                elif uploads:
+                    done_uploads, _ = wait(uploads, return_when=FIRST_COMPLETED)
+                    uploads.difference_update(done_uploads)
+                    for completed in done_uploads:
+                        completed.result()
     finally:
         if owns_state:
             state.close()
