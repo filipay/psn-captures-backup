@@ -130,7 +130,11 @@ def test_sync_records_failures(tmp_path: Path) -> None:
 
 def test_sync_runs_hooks_concurrently(tmp_path: Path, monkeypatch) -> None:
     settings = _settings(
-        tmp_path, max_concurrency=2, upload_concurrency=2, upload_queue_limit=4
+        tmp_path,
+        max_concurrency=2,
+        upload_concurrency=2,
+        upload_queue_limit=4,
+        post_download_script=tmp_path / "hook.sh",
     )
     active = 0
     max_active = 0
@@ -176,7 +180,11 @@ def test_sync_runs_hooks_concurrently(tmp_path: Path, monkeypatch) -> None:
 
 def test_sync_applies_upload_backpressure(tmp_path: Path, monkeypatch) -> None:
     settings = _settings(
-        tmp_path, max_concurrency=2, upload_concurrency=1, upload_queue_limit=1
+        tmp_path,
+        max_concurrency=2,
+        upload_concurrency=1,
+        upload_queue_limit=1,
+        post_download_script=tmp_path / "hook.sh",
     )
     started = Event()
     release = Event()
