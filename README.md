@@ -215,7 +215,7 @@ name (the built-in `--folder-as-tags` tags with a root-prefixed path such as
 
 See [docs/immich.md](docs/immich.md) for the full recipe: install/pin, config
 file (API key off the command line), uploading the existing backlog, the
-systemd timer that keeps it in sync automatically, and the album-per-game
+systemd + inotify watcher that keeps it in sync automatically, and the album-per-game
 alternative.
 
 ## Caveats
