@@ -71,6 +71,7 @@ def test_list_captures_follows_cursor_and_captures_cookies() -> None:
     captures = client.list_captures()
     assert [c.id for c in captures] == ["psn1", "psn2", "psn3"]
     assert captures[2].game_title == "Valheim"
+    assert captures[2].title_id == "PPSA28824_00"
     assert seen_params[0]["includeTokenizedUrls"] == "true"
     assert seen_params[1]["nextCursorMark"] == "PAGE2"
     assert client.cloudfront_cookies == "CloudFront-Policy=abc"
