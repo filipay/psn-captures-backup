@@ -1,7 +1,7 @@
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Lock, Thread
-import time
 
 from psn_captures_backup.config import Settings
 from psn_captures_backup.models import Capture
@@ -132,38 +132,52 @@ def test_sync_runs_hooks_concurrently(tmp_path: Path, monkeypatch) -> None:
     settings = _settings(
         tmp_path, max_concurrency=2, upload_concurrency=2, upload_queue_limit=4
     )
-    state = StateStore(settings.state_file)
     active = 0
     max_active = 0
     lock = Lock()
+    both_started = Event()
+    release = Event()
+    result_holder = {}
 
     def hook(_script: Path, _path: Path) -> None:
         nonlocal active, max_active
         with lock:
             active += 1
             max_active = max(max_active, active)
-        time.sleep(0.05)
+            if active >= 2:
+                both_started.set()
+        assert release.wait(timeout=2)
         with lock:
             active -= 1
 
     monkeypatch.setattr("psn_captures_backup.sync._run_hook", hook)
-    result = sync(
-        settings,
-        tokens=FakeTokens(),
-        psn=FakePsn([_capture("a"), _capture("b"), _capture("c"), _capture("d")]),
-        state=state,
-    )
 
-    assert result.downloaded == 4
+    def runner() -> None:
+        state = StateStore(settings.state_file)
+        try:
+            result_holder["result"] = sync(
+                settings,
+                tokens=FakeTokens(),
+                psn=FakePsn([_capture("a"), _capture("b"), _capture("c"), _capture("d")]),
+                state=state,
+            )
+        finally:
+            state.close()
+
+    worker = Thread(target=runner)
+    worker.start()
+    assert both_started.wait(timeout=2)
+    release.set()
+    worker.join(timeout=2)
+    assert not worker.is_alive()
+    assert result_holder["result"].downloaded == 4
     assert max_active == 2
-    state.close()
 
 
 def test_sync_applies_upload_backpressure(tmp_path: Path, monkeypatch) -> None:
     settings = _settings(
         tmp_path, max_concurrency=2, upload_concurrency=1, upload_queue_limit=1
     )
-    output = settings.output_dir
     started = Event()
     release = Event()
     fake_psn = FakePsn([_capture("a"), _capture("b"), _capture("c")])
