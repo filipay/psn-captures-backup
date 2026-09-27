@@ -192,10 +192,13 @@ run an executable after each successful download. The script is invoked as:
 Hooks run concurrently in a separate worker pool after the state row is written,
 so a slow upload does not prevent other captures from downloading.
 
-When PSN does not provide `sceTitleName`, the client uses the capture's
-`sceTitleId` to look up the game name from the PlayStation Store title metadata
-endpoint. The lookup is cached for the duration of the sync; if it fails, the
-capture remains under `Unknown Game` rather than failing the backup.
+When PSN does not provide `sceTitleName`, the client first uses the capture's
+`title` field. For capture titles ending in an exact 14-digit timestamp, that
+suffix is removed (for example, `Valheim_20260926235351` becomes `Valheim`).
+If neither title field provides a usable name, the client uses
+`sceUserAccountId` and `sceTitleId` with PSN's authenticated game-list
+endpoint to resolve the title. Title lookups are cached for the duration of the
+sync, and failures safely fall back to `Unknown Game`.
 `PSN_UPLOAD_CONCURRENCY` controls how many hooks run at once, while
 `PSN_UPLOAD_QUEUE_LIMIT` bounds queued plus running hooks. When that limit is
 reached, the sync waits for a hook slot before submitting another one. The sync
