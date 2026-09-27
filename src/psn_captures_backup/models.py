@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 UGC_IMAGE = 1
 UGC_VIDEO = 2
+
+_CAPTURE_TITLE_TIMESTAMP = re.compile(r"^(.*)_\d{14}$")
 
 
 class CaptureParseError(ValueError):
@@ -18,6 +21,19 @@ def _first_nonempty_string(item: dict[str, Any], *keys: str) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def _capture_title(item: dict[str, Any]) -> str:
+    title_name = _first_nonempty_string(item, "sceTitleName")
+    if title_name:
+        return title_name
+
+    title = _first_nonempty_string(item, "title")
+    if title:
+        match = _CAPTURE_TITLE_TIMESTAMP.fullmatch(title)
+        return match.group(1).strip() if match else title
+
+    return "Unknown Game"
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -67,13 +83,10 @@ class Capture:
         upload_date = _parse_datetime(item.get("uploadDate"))
         if upload_date is None:
             raise CaptureParseError("'uploadDate' is required")
-        title = item.get("sceTitleName")
-        if not isinstance(title, str) or not title.strip():
-            title = "Unknown Game"
         return cls(
             id=capture_id,
             ugc_type=ugc_type,
-            game_title=title,
+            game_title=_capture_title(item),
             title_id=item.get("sceTitleId") if isinstance(item.get("sceTitleId"), str) else None,
             upload_date=upload_date.astimezone(UTC),
             screenshot_url=item.get("screenshotUrl"),
