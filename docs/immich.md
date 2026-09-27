@@ -150,7 +150,8 @@ each affected game once. Save this as
 #!/bin/sh
 set -eu
 
-CONFIG=/etc/immich-go/immich-go.toml
+CONFIG=/host-immich/config/immich-go.toml
+IMMICH_GO=/host-immich/immich-go
 QUEUE=$(mktemp)
 trap 'rm -f "$QUEUE"' EXIT
 
@@ -160,7 +161,7 @@ done | sort -u > "$QUEUE"
 
 while IFS= read -r game_dir; do
   [ -d "$game_dir" ] || continue
-  immich-go --config "$CONFIG" --concurrent-tasks=4 \
+  "$IMMICH_GO" --config "$CONFIG" --concurrent-tasks=4 \
     upload from-folder --no-ui --on-errors continue --pause-immich-jobs=false \
     --into-album "PlayStation Captures" \
     --tag "$(basename "$game_dir")" \
@@ -173,9 +174,10 @@ that finish close together do not cause ten full folder scans.
 
 ### Docker
 
-The post-download hook runs **inside the backup container**. If you keep the
-static `immich-go` binary and its config on the host, mount those into the
-backup container along with the hook script:
+The post-download hook is **a host script**, not part of the backup image. The
+container only needs to execute the script with the completed capture paths.
+Keep `immich-go`, its config, and the script on the host and bind-mount them
+read-only:
 
 ```yaml
 services:
@@ -183,20 +185,34 @@ services:
     # ...existing settings...
     env_file: .env
     environment:
-      PSN_POST_DOWNLOAD_SCRIPT: /usr/local/bin/psn-captures-to-immich
+      PSN_POST_DOWNLOAD_SCRIPT: /host-immich/psn-captures-to-immich
       PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS: 10
     volumes:
       - /path/to/psn-captures:/captures
-      - /usr/local/bin/immich-go:/usr/local/bin/immich-go:ro
-      - /etc/immich-go:/etc/immich-go:ro
-      - /usr/local/bin/psn-captures-to-immich:/usr/local/bin/psn-captures-to-immich:ro
+      - /usr/local/bin/immich-go:/host-immich/immich-go:ro
+      - /etc/immich-go:/host-immich/config:ro
+      - /usr/local/bin/psn-captures-to-immich:/host-immich/psn-captures-to-immich:ro
 ```
 
-The container user must be able to execute the binary, read the Immich config
-file, and read the capture files. Keep the Immich API key in the config file
+The host script can then invoke the mounted host binary and config using the
+paths visible inside the container. No `immich-go` files need to be added to
+the backup image.
+
+The container user must be able to execute the mounted script and binary, and
+read the config and capture files. Keep the Immich API key in the config file
 rather than putting it on the command line.
 
-No `inotify-tools` package or systemd timer is required for this setup.
+
+### Alternative: filesystem watcher
+
+A periodic or filesystem-driven host-side process is still a valid alternative
+when you prefer the backup container to remain completely unaware of Immich.
+For example, `inotify-tools` can trigger the same host upload script whenever
+a completed capture appears.
+
+This is optional and is not needed when the post-download hook is enabled. It
+also introduces an extra host package and another long-running service, so the
+hook-based approach is the simpler default.
 
 ### One-time backlog upload
 
