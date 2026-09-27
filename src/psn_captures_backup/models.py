@@ -66,7 +66,9 @@ class Capture:
         upload_date = _parse_datetime(item.get("uploadDate"))
         if upload_date is None:
             raise CaptureParseError("'uploadDate' is required")
-        title = _first_nonempty_string(\n            item, "sceTitleName", "titleName", "gameTitle", "title"\n        ) or "Unknown Game"
+        title = _first_nonempty_string(
+            item, "sceTitleName", "titleName", "gameTitle", "title"
+        ) or "Unknown Game"
         return cls(
             id=capture_id,
             ugc_type=ugc_type,
