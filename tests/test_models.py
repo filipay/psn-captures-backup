@@ -67,7 +67,7 @@ def test_parse_video() -> None:
 def test_parse_title_fallback_from_capture_title() -> None:
     capture = Capture.from_api(VALHEIM_ITEM)
     assert capture.game_title == "Valheim"
-    assert capture.capture_date == datetime(2026, 9, 26, 23, 53, 51)
+    assert capture.capture_date == datetime(2026, 9, 26, 23, 53, 51)  # noqa: DTZ001
     assert capture.title_id == "PPSA28824_00"
 
 
