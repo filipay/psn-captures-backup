@@ -33,8 +33,8 @@ class Capture:
     id: str
     ugc_type: int
     game_title: str
-    title_id: str | None
     upload_date: datetime
+    title_id: str | None = None
     screenshot_url: str | None = None
     download_url: str | None = None
     video_url: str | None = None
