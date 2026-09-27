@@ -106,7 +106,7 @@ Environment variables (also readable from a `.env` file):
 | `PSN_STATE_FILE` | `<output>/.psn-captures-state.sqlite` | State DB path. |
 | `PSN_TOKEN_FILE` | `<output>/.psn-token.json` | Persisted refresh token (secret, written `0600`). |
 | `PSN_POLL_INTERVAL` | `21600` (6h) | Seconds between `daemon` syncs. |
-| `PSN_MAX_CONCURRENCY` | `2` | Parallel downloads. |
+| `PSN_MAX_CONCURRENCY` | `2` | Parallel downloads. |\n| `PSN_UPLOAD_CONCURRENCY` | `2` | Maximum number of post-download hooks running at once. |\n| `PSN_UPLOAD_QUEUE_LIMIT` | `4` | Maximum number of queued or running hooks; downloads wait for capacity. |
 | `PSN_INCLUDE_IMAGES` | `true` | Download screenshots. |
 | `PSN_INCLUDE_VIDEOS` | `true` | Download video clips. |
 | `PSN_LOG_LEVEL` | `INFO` | Log verbosity. |
@@ -129,7 +129,7 @@ Per-command flags override the environment:
 - `--state-file PATH`
 - `--token-file PATH`
 - `--no-images` / `--no-videos` (`sync`, `list`)
-- `--max-concurrency N`
+- `--max-concurrency N`\n- `--upload-concurrency N`\n- `--upload-queue-limit N`
 - `--dry-run` (`sync`)
 - `--post-download-script PATH`
 - `--flat`
