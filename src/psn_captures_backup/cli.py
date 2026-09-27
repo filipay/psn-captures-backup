@@ -69,6 +69,8 @@ def _parser() -> argparse.ArgumentParser:
         cmd.add_argument("--flat", action="store_true", default=None)
         cmd.add_argument("--post-download-script")
         cmd.add_argument("--max-concurrency", type=int)
+        cmd.add_argument("--upload-concurrency", type=int)
+        cmd.add_argument("--upload-queue-limit", type=int)
         cmd.add_argument("--json-log", action="store_true", default=None)
         cmd.add_argument("--verbose", action="store_true")
         if name in ("sync", "daemon", "list"):
@@ -99,6 +101,8 @@ def _settings_for(args: argparse.Namespace) -> Settings:
         "flat": getattr(args, "flat", None),
         "post_download_script": _path("post_download_script"),
         "max_concurrency": getattr(args, "max_concurrency", None),
+        "upload_concurrency": getattr(args, "upload_concurrency", None),
+        "upload_queue_limit": getattr(args, "upload_queue_limit", None),
         "json_log": getattr(args, "json_log", None),
         "dry_run": getattr(args, "dry_run", None),
     }
@@ -112,6 +116,10 @@ def _settings_for(args: argparse.Namespace) -> Settings:
     max_concurrency = overrides.get("max_concurrency")
     if isinstance(max_concurrency, int) and max_concurrency <= 0:
         raise ConfigError("--max-concurrency must be positive")
+    for key in ("upload_concurrency", "upload_queue_limit"):
+        value = overrides.get(key)
+        if isinstance(value, int) and value <= 0:
+            raise ConfigError(f"--{key.replace(chr(95), chr(45))} must be positive")
     interval = getattr(args, "interval", None)
     if isinstance(interval, int) and interval <= 0:
         raise ConfigError("--interval must be positive")

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import logging
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
 
 from .models import Capture, CaptureParseError
 from .output import write_atomic
+
+log = logging.getLogger(__name__)
+
+STORE_TITLE_URL = (
+    "https://store.playstation.com/store/api/chihiro/00_09_000/titlecontainer/GB/en/999"
+)
 
 PSN_BASE_URL = (
     "https://m.np.playstation.com/api/gameMediaService/v2/c2s"
@@ -31,6 +39,7 @@ class PsnClient:
         self._client = client or httpx.Client(timeout=60.0)
         self._headers = {"Authorization": f"Bearer {access_token}"}
         self.cloudfront_cookies = ""
+        self._title_cache: dict[str, str | None] = {}
 
     def close(self) -> None:
         self._client.close()
@@ -54,15 +63,50 @@ class PsnClient:
             payload = response.json()
             for item in payload.get("ugcDocument", []):
                 try:
-                    captures.append(Capture.from_api(item))
+                    capture = Capture.from_api(item)
                 except CaptureParseError:
                     continue
+                if capture.game_title == "Unknown Game" and capture.title_id:
+                    resolved = self._lookup_title_name(capture.title_id)
+                    if resolved:
+                        capture = replace(capture, game_title=resolved)
+                captures.append(capture)
             next_cursor = payload.get("nextCursorMark")
             if not next_cursor or next_cursor == _TERMINAL_CURSOR or next_cursor in seen_cursors:
                 break
             seen_cursors.add(next_cursor)
             cursor = next_cursor
         return captures
+
+    def _lookup_title_name(self, title_id: str) -> str | None:
+        if title_id in self._title_cache:
+            return self._title_cache[title_id]
+
+        normalized = title_id if "_" in title_id else f"{title_id}_00"
+        try:
+            response = self._client.get(f"{STORE_TITLE_URL}/{normalized}")
+            if response.status_code >= 400:
+                log.warning(
+                    "PS Store title lookup failed for %s: HTTP %s",
+                    title_id,
+                    response.status_code,
+                )
+                self._title_cache[title_id] = None
+                return None
+            payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("PS Store title lookup failed for %s: %s", title_id, exc)
+            self._title_cache[title_id] = None
+            return None
+
+        for key in ("name", "localizedName", "title"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                self._title_cache[title_id] = value.strip()
+                return value.strip()
+
+        self._title_cache[title_id] = None
+        return None
 
     def download_to(self, capture: Capture, dest: Path) -> tuple[str, int]:
         if capture.is_video:

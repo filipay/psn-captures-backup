@@ -1,7 +1,7 @@
 services:
   psn-captures-backup:
-    build: .
-    image: psn-captures-backup:latest
+    image: ghcr.io/filipay/psn-captures-backup:latest
+    pull_policy: always
     container_name: psn-captures-backup
     restart: unless-stopped
     # Run as the user that owns the bind mount below. The image defaults to uid

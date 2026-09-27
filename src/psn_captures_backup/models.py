@@ -12,6 +12,14 @@ class CaptureParseError(ValueError):
     """Raised when a ugcDocument entry is missing required fields."""
 
 
+def _first_nonempty_string(item: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _parse_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
@@ -26,6 +34,7 @@ class Capture:
     ugc_type: int
     game_title: str
     upload_date: datetime
+    title_id: str | None = None
     screenshot_url: str | None = None
     download_url: str | None = None
     video_url: str | None = None
@@ -58,11 +67,14 @@ class Capture:
         upload_date = _parse_datetime(item.get("uploadDate"))
         if upload_date is None:
             raise CaptureParseError("'uploadDate' is required")
-        title = item.get("sceTitleName") or "Unknown Game"
+        title = item.get("sceTitleName")
+        if not isinstance(title, str) or not title.strip():
+            title = "Unknown Game"
         return cls(
             id=capture_id,
             ugc_type=ugc_type,
             game_title=title,
+            title_id=item.get("sceTitleId") if isinstance(item.get("sceTitleId"), str) else None,
             upload_date=upload_date.astimezone(UTC),
             screenshot_url=item.get("screenshotUrl"),
             download_url=item.get("downloadUrl"),

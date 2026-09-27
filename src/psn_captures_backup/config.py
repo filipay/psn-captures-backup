@@ -28,6 +28,8 @@ class Settings:
     token_file: Path
     poll_interval: int = 21600
     max_concurrency: int = 2
+    upload_concurrency: int = 2
+    upload_queue_limit: int = 4
     include_images: bool = True
     include_videos: bool = True
     log_level: str = "INFO"
@@ -57,12 +59,18 @@ class Settings:
             raise ConfigError(f"PSN_POLL_INTERVAL must be an integer: {exc}") from exc
         try:
             max_concurrency = int(values.get("PSN_MAX_CONCURRENCY", "2"))
+            upload_concurrency = int(values.get("PSN_UPLOAD_CONCURRENCY", "2"))
+            upload_queue_limit = int(values.get("PSN_UPLOAD_QUEUE_LIMIT", "4"))
         except ValueError as exc:
-            raise ConfigError(f"PSN_MAX_CONCURRENCY must be an integer: {exc}") from exc
+            raise ConfigError(f"concurrency settings must be integers: {exc}") from exc
         if poll_interval <= 0:
             raise ConfigError("PSN_POLL_INTERVAL must be positive")
         if max_concurrency <= 0:
             raise ConfigError("PSN_MAX_CONCURRENCY must be positive")
+        if upload_concurrency <= 0:
+            raise ConfigError("PSN_UPLOAD_CONCURRENCY must be positive")
+        if upload_queue_limit <= 0:
+            raise ConfigError("PSN_UPLOAD_QUEUE_LIMIT must be positive")
 
         script = values.get("PSN_POST_DOWNLOAD_SCRIPT")
         return cls(
@@ -72,6 +80,8 @@ class Settings:
             token_file=token_file,
             poll_interval=poll_interval,
             max_concurrency=max_concurrency,
+            upload_concurrency=upload_concurrency,
+            upload_queue_limit=upload_queue_limit,
             include_images=_parse_bool(values.get("PSN_INCLUDE_IMAGES", "true")),
             include_videos=_parse_bool(values.get("PSN_INCLUDE_VIDEOS", "true")),
             log_level=values.get("PSN_LOG_LEVEL", "INFO").upper(),

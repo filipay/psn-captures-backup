@@ -8,6 +8,7 @@ COPY src ./src
 RUN pip install --no-compile .
 
 FROM base AS runtime
+LABEL org.opencontainers.image.source="https://github.com/filipay/psn-captures-backup"
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir -p /captures \
     && chown appuser:appuser /captures

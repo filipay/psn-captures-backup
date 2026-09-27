@@ -32,6 +32,7 @@ VIDEO_ITEM = {
 def test_parse_image() -> None:
     capture = Capture.from_api(IMAGE_ITEM)
     assert capture.id == IMAGE_ITEM["id"]
+    assert capture.title_id is None
     assert capture.is_image and not capture.is_video
     assert capture.game_title == "Marvel’s Spider-Man 2"
     assert capture.upload_date == datetime(2025, 10, 11, 23, 6, 27, 983000, tzinfo=UTC)
@@ -54,7 +55,7 @@ def test_unknown_ugc_type_raises() -> None:
         Capture.from_api({"id": "x", "ugcType": 9, "uploadDate": "2025-10-11T23:06:27.983Z"})
 
 
-def test_missing_title_falls_back() -> None:
+def test_missing_all_title_fields_falls_back() -> None:
     capture = Capture.from_api(
         {"id": "x", "ugcType": 1, "sceTitleName": None, "uploadDate": "2025-10-11T23:06:27.983Z"}
     )
