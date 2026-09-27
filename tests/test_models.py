@@ -67,6 +67,7 @@ def test_parse_video() -> None:
 def test_parse_title_fallback_from_capture_title() -> None:
     capture = Capture.from_api(VALHEIM_ITEM)
     assert capture.game_title == "Valheim"
+    assert capture.capture_date == datetime(2026, 9, 26, 23, 53, 51)
     assert capture.title_id == "PPSA28824_00"
 
 
@@ -90,3 +91,17 @@ def test_missing_all_title_fields_falls_back() -> None:
         {"id": "x", "ugcType": 1, "sceTitleName": None, "uploadDate": "2025-10-11T23:06:27.983Z"}
     )
     assert capture.game_title == "Unknown Game"
+
+
+
+def test_invalid_capture_timestamp_falls_back_to_upload_date() -> None:
+    item = {
+        "id": "psn-invalid-timestamp",
+        "ugcType": 2,
+        "sceTitleName": None,
+        "title": "Valheim_20261301235959",
+        "uploadDate": "2026-09-27T00:00:00Z",
+    }
+    capture = Capture.from_api(item)
+    assert capture.game_title == "Valheim"
+    assert capture.capture_date is None
