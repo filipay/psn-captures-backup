@@ -11,14 +11,11 @@ from .output import write_atomic
 
 log = logging.getLogger(__name__)
 
-STORE_TITLE_URL = (
-    "https://store.playstation.com/store/api/chihiro/00_09_000/titlecontainer/GB/en/999"
-)
-
 PSN_BASE_URL = (
     "https://m.np.playstation.com/api/gameMediaService/v2/c2s"
     "/category/cloudMediaGallery/ugcType/all"
 )
+GAME_LIST_BASE_URL = "https://m.np.playstation.net/api/gamelist/v2/users"
 _TERMINAL_CURSOR = "-1"
 
 
@@ -39,7 +36,7 @@ class PsnClient:
         self._client = client or httpx.Client(timeout=60.0)
         self._headers = {"Authorization": f"Bearer {access_token}"}
         self.cloudfront_cookies = ""
-        self._title_cache: dict[str, str | None] = {}
+        self._title_cache: dict[tuple[str, str], str | None] = {}
 
     def close(self) -> None:
         self._client.close()
@@ -67,9 +64,11 @@ class PsnClient:
                 except CaptureParseError:
                     continue
                 if capture.game_title == "Unknown Game" and capture.title_id:
-                    resolved = self._lookup_title_name(capture.title_id)
-                    if resolved:
-                        capture = replace(capture, game_title=resolved)
+                    account_id = item.get("sceUserAccountId")
+                    if isinstance(account_id, str) and account_id:
+                        resolved = self._lookup_title_name(account_id, capture.title_id)
+                        if resolved:
+                            capture = replace(capture, game_title=resolved)
                 captures.append(capture)
             next_cursor = payload.get("nextCursorMark")
             if not next_cursor or next_cursor == _TERMINAL_CURSOR or next_cursor in seen_cursors:
@@ -78,34 +77,38 @@ class PsnClient:
             cursor = next_cursor
         return captures
 
-    def _lookup_title_name(self, title_id: str) -> str | None:
-        if title_id in self._title_cache:
-            return self._title_cache[title_id]
+    def _lookup_title_name(self, account_id: str, title_id: str) -> str | None:
+        cache_key = (account_id, title_id)
+        if cache_key in self._title_cache:
+            return self._title_cache[cache_key]
 
-        normalized = title_id if "_" in title_id else f"{title_id}_00"
         try:
-            response = self._client.get(f"{STORE_TITLE_URL}/{normalized}")
+            response = self._client.get(
+                f"{GAME_LIST_BASE_URL}/{account_id}/titles/{title_id}",
+                headers=self._headers,
+            )
             if response.status_code >= 400:
                 log.warning(
-                    "PS Store title lookup failed for %s: HTTP %s",
+                    "PSN game title lookup failed for %s: HTTP %s",
                     title_id,
                     response.status_code,
                 )
-                self._title_cache[title_id] = None
+                self._title_cache[cache_key] = None
                 return None
             payload = response.json()
         except (httpx.HTTPError, ValueError) as exc:
-            log.warning("PS Store title lookup failed for %s: %s", title_id, exc)
-            self._title_cache[title_id] = None
+            log.warning("PSN game title lookup failed for %s: %s", title_id, exc)
+            self._title_cache[cache_key] = None
             return None
 
-        for key in ("name", "localizedName", "title"):
+        for key in ("localizedName", "name"):
             value = payload.get(key)
             if isinstance(value, str) and value.strip():
-                self._title_cache[title_id] = value.strip()
-                return value.strip()
+                resolved = value.strip()
+                self._title_cache[cache_key] = resolved
+                return resolved
 
-        self._title_cache[title_id] = None
+        self._title_cache[cache_key] = None
         return None
 
     def download_to(self, capture: Capture, dest: Path) -> tuple[str, int]:
