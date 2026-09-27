@@ -14,13 +14,24 @@ IMAGE = {
     "screenshotUrl": "https://cdn.example/screenshot.jpg",
     "fileType": "JPEG",
 }
-UNKNOWN_GAME = {
+VALHEIM = {
     "id": "psn3",
     "ugcType": 1,
     "sceTitleName": None,
     "sceTitleId": "PPSA28824_00",
+    "title": "Valheim_20260926235351",
     "uploadDate": "2025-10-13T00:00:00Z",
     "screenshotUrl": "https://cdn.example/valheim.jpg",
+    "fileType": "JPEG",
+}
+UNKNOWN_GAME = {
+    "id": "psn4",
+    "ugcType": 1,
+    "sceTitleName": None,
+    "sceTitleId": "CUSA00000_00",
+    "sceUserAccountId": "1234567890",
+    "uploadDate": "2025-10-14T00:00:00Z",
+    "screenshotUrl": "https://cdn.example/unknown.jpg",
     "fileType": "JPEG",
 }
 
@@ -46,17 +57,22 @@ def test_list_captures_follows_cursor_and_captures_cookies() -> None:
             "limit": 1,
         },
         {
-            "ugcDocument": [VIDEO, UNKNOWN_GAME],
+            "ugcDocument": [VIDEO, VALHEIM, UNKNOWN_GAME],
             "nextCursorMark": "-1",
             "limit": 1,
         },
     ]
     seen_params = []
+    seen_lookup_urls = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
-        if "titlecontainer" in url:
-            return httpx.Response(200, json={"name": "Valheim"})
+        if "gamelist/v2/users" in url:
+            seen_lookup_urls.append(url)
+            return httpx.Response(
+                200,
+                json={"name": "Fallback Game", "localizedName": "Fallback Game (EN)"},
+            )
         if "cdn.example" in url:
             return httpx.Response(200, content=b"media")
         seen_params.append(dict(request.url.params))
@@ -69,9 +85,13 @@ def test_list_captures_follows_cursor_and_captures_cookies() -> None:
 
     client = PsnClient("TOKEN", client=_client(handler))
     captures = client.list_captures()
-    assert [c.id for c in captures] == ["psn1", "psn2", "psn3"]
+    assert [c.id for c in captures] == ["psn1", "psn2", "psn3", "psn4"]
     assert captures[2].game_title == "Valheim"
     assert captures[2].title_id == "PPSA28824_00"
+    assert captures[3].game_title == "Fallback Game (EN)"
+    assert seen_lookup_urls == [
+        "https://m.np.playstation.net/api/gamelist/v2/users/1234567890/titles/CUSA00000_00"
+    ]
     assert seen_params[0]["includeTokenizedUrls"] == "true"
     assert seen_params[1]["nextCursorMark"] == "PAGE2"
     assert client.cloudfront_cookies == "CloudFront-Policy=abc"
