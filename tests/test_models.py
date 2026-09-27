@@ -54,7 +54,20 @@ def test_unknown_ugc_type_raises() -> None:
         Capture.from_api({"id": "x", "ugcType": 9, "uploadDate": "2025-10-11T23:06:27.983Z"})
 
 
-def test_missing_title_falls_back() -> None:
+def test_missing_title_uses_explicit_fallback_fields() -> None:
+    capture = Capture.from_api(
+        {
+            "id": "x",
+            "ugcType": 1,
+            "sceTitleName": None,
+            "titleName": "Valheim",
+            "uploadDate": "2025-10-11T23:06:27.983Z",
+        }
+    )
+    assert capture.game_title == "Valheim"
+
+
+def test_missing_all_title_fields_falls_back() -> None:
     capture = Capture.from_api(
         {"id": "x", "ugcType": 1, "sceTitleName": None, "uploadDate": "2025-10-11T23:06:27.983Z"}
     )
