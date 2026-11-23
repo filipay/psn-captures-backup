@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from .auth import AuthError, TokenManager
 from .config import ConfigError, Settings
+from .metrics import MetricsServer, MetricsState, refresh_expiry_warning
 from .psn import PsnClient, PsnError
 from .state import StateError
 from .sync import sync
@@ -197,24 +198,45 @@ def _cmd_daemon(settings: Settings, args: argparse.Namespace) -> int:
 
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
-    while not stopping:
+    metrics_state = MetricsState(
+        last_auth_success=time.time(), last_sync_success=time.time()
+    )
+    metrics_server: MetricsServer | None = None
+    if settings.metrics_addr:
         try:
-            result = sync(settings)
-            log.info(
-                "sync complete: listed=%s downloaded=%s skipped=%s failed=%s",
-                result.listed,
-                result.downloaded,
-                result.skipped,
-                result.failed,
+            metrics_server = MetricsServer(
+                settings.metrics_addr, metrics_state, settings.token_file
             )
-        except AuthError as exc:
-            log.error("authentication failed: %s", exc)
-        except Exception as exc:  # noqa: BLE001 - keep the daemon alive
-            log.error("sync failed: %s", exc)
-        for _ in range(interval):
-            if stopping:
-                break
-            time.sleep(1)
+            metrics_server.start()
+        except (OSError, ValueError) as exc:
+            log.error("cannot start metrics server: %s", exc)
+    try:
+        while not stopping:
+            try:
+                result = sync(settings)
+                metrics_state.record_success(result, time.time())
+                log.info(
+                    "sync complete: listed=%s downloaded=%s skipped=%s failed=%s",
+                    result.listed,
+                    result.downloaded,
+                    result.skipped,
+                    result.failed,
+                )
+            except AuthError as exc:
+                metrics_state.auth_ok = False
+                log.error("authentication failed: %s", exc)
+            except Exception as exc:  # noqa: BLE001 - keep the daemon alive
+                log.error("sync failed: %s", exc)
+            warning = refresh_expiry_warning(settings.token_file, time.time())
+            if warning:
+                log.warning("%s", warning)
+            for _ in range(interval):
+                if stopping:
+                    break
+                time.sleep(1)
+    finally:
+        if metrics_server is not None:
+            metrics_server.close()
     return 0
 
 

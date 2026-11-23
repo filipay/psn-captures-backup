@@ -46,7 +46,7 @@ def _capture_date(item: dict[str, Any]) -> datetime | None:
     try:
         # PSN's title timestamp has no timezone information. Preserve the
         # wall-clock value exactly as reported by the console.
-        return datetime.strptime(match.group(2), "%Y%m%d%H%M%S")  # noqa: DTZ007
+        return datetime.strptime(match.group(2), "%Y%m%d%H%M%S")
     except ValueError:
         return None
 
@@ -75,6 +75,8 @@ class Capture:
     file_size: int | None = None
     file_type: str | None = None
     source_of_media: str | None = None
+    transcode_status: str | None = None
+    transcode_error: str | None = None
 
     @property
     def is_image(self) -> bool:
@@ -114,4 +116,6 @@ class Capture:
             file_size=item.get("fileSize"),
             file_type=item.get("fileType"),
             source_of_media=item.get("sourceOfMedia"),
+            transcode_status=item.get("transcodeStatus"),
+            transcode_error=item.get("transcodeError"),
         )

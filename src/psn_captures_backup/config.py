@@ -33,6 +33,7 @@ class Settings:
     include_images: bool = True
     include_videos: bool = True
     log_level: str = "INFO"
+    metrics_addr: str | None = None
     flat: bool = False
     post_download_script: Path | None = None
     post_download_debounce_seconds: float = 0.0
@@ -79,6 +80,11 @@ class Settings:
             raise ConfigError("PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS must not be negative")
 
         script = values.get("PSN_POST_DOWNLOAD_SCRIPT")
+        metrics_addr = values.get("PSN_METRICS_ADDR", "").strip() or None
+        if metrics_addr is not None:
+            _, separator, port = metrics_addr.rpartition(":")
+            if not separator or not port.isdigit() or not 0 < int(port) < 65536:
+                raise ConfigError("PSN_METRICS_ADDR must be HOST:PORT")
         return cls(
             npsso=npsso,
             output_dir=output_dir,
@@ -91,6 +97,7 @@ class Settings:
             include_images=_parse_bool(values.get("PSN_INCLUDE_IMAGES", "true")),
             include_videos=_parse_bool(values.get("PSN_INCLUDE_VIDEOS", "true")),
             log_level=values.get("PSN_LOG_LEVEL", "INFO").upper(),
+            metrics_addr=metrics_addr,
             post_download_script=Path(script).expanduser() if script else None,
             post_download_debounce_seconds=post_download_debounce_seconds,
         )
