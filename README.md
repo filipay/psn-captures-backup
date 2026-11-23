@@ -95,6 +95,30 @@ like a password.
 The NPSSO itself expires after roughly **60 days**; when it does, the tool logs
 a clear error and exits non-zero. Re-paste a fresh value and restart the daemon.
 
+## Token file (`PSN_TOKEN_FILE`)
+
+You do not create this file by hand. The first authenticated command (`auth`,
+`list`, `sync` or `daemon`) exchanges `NPSSO` for an access/refresh token pair
+and writes it to `PSN_TOKEN_FILE` — by default `<PSN_OUTPUT_DIR>/.psn-token.json`,
+mode `0600`, JSON. Later runs reuse it and refresh the short-lived access token
+in place.
+
+```bash
+psn-captures-backup auth                                  # create or update the token file
+psn-captures-backup auth --check                          # validate; refreshes if needed
+psn-captures-backup auth --token-file /captures/.psn-token.json
+```
+
+- The file holds secrets (`access_token`, `refresh_token`). Keep it on
+  persistent, private storage; never commit or share it.
+- In Docker, point `PSN_TOKEN_FILE` at the mounted volume (the examples use
+  `/captures/.psn-token.json`) so tokens survive container restarts.
+- If the file is missing or unreadable it is recreated from `NPSSO`. If a
+  refresh is rejected the tool falls back to a fresh `NPSSO` exchange.
+- `NPSSO` must still be set even when a valid token file exists; it is the
+  fallback when the refresh token expires. Delete the file to force a fresh
+  exchange, for example after changing accounts.
+
 ## Configuration
 
 Environment variables (also readable from a `.env` file):
@@ -104,7 +128,7 @@ Environment variables (also readable from a `.env` file):
 | `NPSSO` | — (required) | Sony NPSSO cookie value. Secret. |
 | `PSN_OUTPUT_DIR` | `./captures` | Where downloaded media is written. |
 | `PSN_STATE_FILE` | `<output>/.psn-captures-state.sqlite` | State DB path. |
-| `PSN_TOKEN_FILE` | `<output>/.psn-token.json` | Persisted refresh token (secret, written `0600`). |
+| `PSN_TOKEN_FILE` | `<output>/.psn-token.json` | Persisted access/refresh tokens. Created automatically by `auth` (or the first sync); secret, written `0600`. |
 | `PSN_POLL_INTERVAL` | `21600` (6h) | Seconds between `daemon` syncs. |
 | `PSN_MAX_CONCURRENCY` | `2` | Parallel downloads. |
 | `PSN_UPLOAD_CONCURRENCY` | `2` | Maximum number of post-download hooks running at once. |
@@ -249,10 +273,16 @@ These are important. Read them before pointing this at your account.
    3 minutes and at most 1080p** are auto-uploaded by the console. Full-quality
    captures require a manual console-side USB export; this tool cannot retrieve
    what the console never uploaded.
-4. **NPSSO expiry (~60 days).** The NPSSO cookie is short-lived. You must
+4. **Videos appear before their transcode finishes.** PSN lists a new video
+   while `transcodeStatus` is still `ready_to_transcode`; its download URL
+   returns CloudFront 403 until the MP4 exists. The tool skips those captures
+   (logged as "not ready yet") and retries them on the next poll, so they are
+   not counted as failures. See
+   [docs/cloudfront-403-investigation.md](docs/cloudfront-403-investigation.md).
+5. **NPSSO expiry (~60 days).** The NPSSO cookie is short-lived. You must
    periodically paste a fresh one; the tool logs a clear, actionable error when
    auth fails. This is unavoidable without a full 2FA login flow, which is out of
    scope.
-5. **Breakage after PS App updates.** The client credentials and endpoint
+6. **Breakage after PS App updates.** The client credentials and endpoint
    shapes could change at any PlayStation App release, which may break listing or
    downloads until this project is updated.
