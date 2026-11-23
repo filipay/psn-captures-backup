@@ -80,6 +80,7 @@ def _parser() -> argparse.ArgumentParser:
             cmd.add_argument("--no-videos", action="store_true")
         if name == "sync":
             cmd.add_argument("--dry-run", action="store_true", default=None)
+            cmd.add_argument("--redownload", action="store_true", default=None)
         if name == "daemon":
             cmd.add_argument("--interval", type=int)
 
@@ -110,6 +111,7 @@ def _settings_for(args: argparse.Namespace) -> Settings:
         "upload_queue_limit": getattr(args, "upload_queue_limit", None),
         "json_log": getattr(args, "json_log", None),
         "dry_run": getattr(args, "dry_run", None),
+        "redownload": getattr(args, "redownload", None),
     }
     if getattr(args, "no_images", False):
         overrides["include_images"] = False
@@ -132,7 +134,8 @@ def _settings_for(args: argparse.Namespace) -> Settings:
     if isinstance(interval, int) and interval <= 0:
         raise ConfigError("--interval must be positive")
 
-    return settings.with_overrides(**overrides)
+    settings = settings.with_overrides(**overrides)
+    return settings
 
 
 def _cmd_auth(settings: Settings, args: argparse.Namespace) -> int:

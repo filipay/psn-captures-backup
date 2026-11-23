@@ -37,6 +37,7 @@ class Settings:
     flat: bool = False
     post_download_script: Path | None = None
     post_download_debounce_seconds: float = 0.0
+    redownload: bool = False
     dry_run: bool = False
     json_log: bool = False
 

@@ -45,6 +45,16 @@ def test_persists_across_reopen(tmp_path: Path) -> None:
     reopened.close()
 
 
+def test_record_processed_keeps_done_after_file_removed(tmp_path: Path) -> None:
+    store = StateStore(tmp_path / "state.sqlite")
+    store.record_downloaded(_capture(), Path("/out/f.jpg"), "abc", 10)
+    store.record_processed(_capture())
+    row = store.get("psn1")
+    assert row is not None and row.status == "processed"
+    assert store.is_done("psn1") is True
+    store.close()
+
+
 def test_unknown_id_is_none(tmp_path: Path) -> None:
     store = StateStore(tmp_path / "state.sqlite")
     assert store.get("nope") is None

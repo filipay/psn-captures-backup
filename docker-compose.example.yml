@@ -19,6 +19,7 @@ services:
       # Optional Prometheus endpoint for Grafana Alloy/Prometheus (daemon only).
       # Uncomment this and the port mapping below to enable scraping.
       # PSN_METRICS_ADDR: 0.0.0.0:9101
+      # Only affects log timestamp rendering, not capture dates (taken from PSN/UTC).
       TZ: UTC
     # ports:
     #   - "9101:9101"

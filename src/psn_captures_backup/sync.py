@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import subprocess
 import threading
 import time
@@ -43,16 +44,13 @@ def _media_not_ready(capture: Capture) -> bool:
 
 
 def _already_downloaded(state: StateStore, capture: Capture) -> bool:
+    # The state DB is the source of truth: an entry means the capture was
+    # downloaded, even if the file was later deleted by a hook or by hand.
     row = state.get(capture.id)
-    return (
-        row is not None
-        and row.status == "downloaded"
-        and row.local_path is not None
-        and Path(row.local_path).exists()
-    )
+    return row is not None and row.status in ("downloaded", "processed")
 
 
-def _run_hook(script: Path, paths: list[Path]) -> None:
+def _run_hook(script: Path, paths: list[Path]) -> bool:
     try:
         completed = subprocess.run(
             [str(script), *(str(path) for path in paths)],
@@ -65,8 +63,18 @@ def _run_hook(script: Path, paths: list[Path]) -> None:
                 completed.returncode,
                 len(paths),
             )
+            return False
     except (OSError, subprocess.TimeoutExpired) as exc:
         log.warning("post-download hook failed for %s capture(s): %s", len(paths), exc)
+        return False
+    return True
+
+
+def _mark_processed(state: StateStore, processed: list[tuple[Capture, Path]]) -> None:
+    # The hook exit status is the signal that the downstream app finished.
+    # Extra state only; downloads are skipped from 'downloaded' regardless.
+    for capture, _path in processed:
+        state.record_processed(capture)
 
 
 class _PostDownloadHookDispatcher:
@@ -87,10 +95,11 @@ class _PostDownloadHookDispatcher:
             thread_name_prefix="post-download-hook",
         )
         self._condition = threading.Condition()
-        self._pending: list[Path] = []
+        self._pending: list[tuple[Capture, Path]] = []
         self._deadline: float | None = None
         self._closed = False
-        self._futures: set[Future[None]] = set()
+        self._futures: set[Future[bool]] = set()
+        self._processed: queue.Queue[list[tuple[Capture, Path]]] = queue.Queue()
         self._thread = threading.Thread(
             target=self._run,
             name="post-download-hook-dispatcher",
@@ -98,11 +107,19 @@ class _PostDownloadHookDispatcher:
         )
         self._thread.start()
 
-    def submit(self, path: Path) -> None:
+    def submit(self, capture: Capture, path: Path) -> None:
         with self._condition:
-            self._pending.append(path)
+            self._pending.append((capture, path))
             self._deadline = time.monotonic() + self._debounce_seconds
             self._condition.notify()
+
+    def drain_processed(self) -> list[tuple[Capture, Path]]:
+        processed: list[tuple[Capture, Path]] = []
+        while True:
+            try:
+                processed.extend(self._processed.get_nowait())
+            except queue.Empty:
+                return processed
 
     def close(self) -> None:
         with self._condition:
@@ -134,14 +151,24 @@ class _PostDownloadHookDispatcher:
 
             self._submit_batch(batch)
 
-    def _submit_batch(self, paths: list[Path]) -> None:
+    def _submit_batch(self, batch: list[tuple[Capture, Path]]) -> None:
+        paths = [path for _, path in batch]
         while len(self._futures) >= self._queue_limit:
             done, _ = wait(self._futures, return_when=FIRST_COMPLETED)
             self._futures.difference_update(done)
-            for future in done:
-                future.result()
 
-        self._futures.add(self._executor.submit(_run_hook, self._script, paths))
+        future = self._executor.submit(_run_hook, self._script, paths)
+        self._futures.add(future)
+        future.add_done_callback(lambda done: self._on_hook_done(done, batch))
+
+    def _on_hook_done(self, future: Future[bool], batch: list[tuple[Capture, Path]]) -> None:
+        try:
+            succeeded = future.result()
+        except Exception as exc:  # noqa: BLE001 - a hook bug must not kill the dispatcher
+            log.warning("post-download hook failed: %s", exc)
+            return
+        if succeeded:
+            self._processed.put(batch)
 
 
 def _download_one(psn: PsnClient, settings: Settings, capture: Capture) -> tuple[Path, str, int]:
@@ -175,7 +202,7 @@ def sync(
         for capture in captures:
             if not _wanted(capture, settings):
                 continue
-            if _already_downloaded(state, capture):
+            if not settings.redownload and _already_downloaded(state, capture):
                 result.skipped += 1
                 continue
             if _media_not_ready(capture):
@@ -209,7 +236,7 @@ def sync(
             )
             pending_downloads = iter(pending)
             downloads: dict[Future[tuple[Path, str, int]], Capture] = {}
-            uploads: set[Future[None]] = set()
+            uploads: dict[Future[bool], tuple[Capture, Path]] = {}
 
             def submit_download() -> None:
                 try:
@@ -242,30 +269,43 @@ def sync(
 
                             if settings.post_download_script:
                                 if hook_dispatcher is not None:
-                                    hook_dispatcher.submit(dest)
+                                    hook_dispatcher.submit(capture, dest)
                                 else:
                                     while len(uploads) >= settings.upload_queue_limit:
                                         done_uploads, _ = wait(
                                             uploads, return_when=FIRST_COMPLETED
                                         )
-                                        uploads.difference_update(done_uploads)
                                         for completed in done_uploads:
-                                            completed.result()
-                                    uploads.add(
+                                            processed_capture, processed_path = uploads.pop(
+                                                completed
+                                            )
+                                            if completed.result():
+                                                _mark_processed(
+                                                    state,
+                                                    [(processed_capture, processed_path)],
+                                                )
+                                    uploads[
                                         upload_pool.submit(
-                                            _run_hook, settings.post_download_script, [dest]
+                                            _run_hook,
+                                            settings.post_download_script,
+                                            [dest],
                                         )
-                                    )
+                                    ] = (capture, dest)
 
                         submit_download()
                 elif uploads:
                     done_uploads, _ = wait(uploads, return_when=FIRST_COMPLETED)
-                    uploads.difference_update(done_uploads)
                     for completed in done_uploads:
-                        completed.result()
+                        processed_capture, processed_path = uploads.pop(completed)
+                        if completed.result():
+                            _mark_processed(state, [(processed_capture, processed_path)])
+
+                if hook_dispatcher is not None:
+                    _mark_processed(state, hook_dispatcher.drain_processed())
 
             if hook_dispatcher is not None:
                 hook_dispatcher.close()
+                _mark_processed(state, hook_dispatcher.drain_processed())
     finally:
         if owns_state:
             state.close()

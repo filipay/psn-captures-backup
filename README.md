@@ -55,6 +55,11 @@ docker compose -f docker-compose.example.yml up -d
 Replace `/path/to/psn-captures` with the host folder captures should be written
 to (the container sees it as `/captures`).
 
+`docker-compose.example.yml` pulls the published GHCR image. A local
+`docker-compose.yml` is gitignored for instance-specific settings; if you keep
+one, expect to build/tag `psn-captures-backup:latest` yourself and adjust its
+hard-coded mount path.
+
 The image is multi-stage and runs as a non-root user (uid `10001` by default).
 It creates `/captures` owned by that user, so a **named volume** just works. With
 a **bind mount** to a host path, the host directory's ownership applies instead,
@@ -67,7 +72,7 @@ there. Either:
 
 ### pip
 
-Requires Python >= 3.11 (`python3`; the tool targets Python 3, not 2).
+Requires Python >= 3.11.
 
 ```bash
 python3 -m venv .venv
@@ -92,16 +97,31 @@ like a password.
 3. Copy the **64-character** `npsso` value from the JSON response.
 4. Put it in your `.env` (or environment) as `NPSSO=...`.
 
-The NPSSO itself expires after roughly **60 days**; when it does, the tool logs
-a clear error and exits non-zero. Re-paste a fresh value and restart the daemon.
+The NPSSO itself expires after roughly **60 days**. When it does, `auth`, `list`
+and `sync` log a clear error and exit `1`; `daemon` logs the error, reports
+`psn_auth_ok 0`, and keeps polling, but configuration is read at startup, so it
+only picks up a new NPSSO after a restart.
+
+After adding or changing `NPSSO`, run `auth` once to verify it and write the
+token file:
+
+```bash
+psn-captures-backup auth
+# In Docker, run the same one-off container as `daemon` with this command instead.
+```
+
+That gives immediate feedback instead of waiting for the first scheduled sync,
+and leaves `daemon` with a fresh token file to reuse and refresh.
 
 ## Token file (`PSN_TOKEN_FILE`)
 
-You do not create this file by hand. The first authenticated command (`auth`,
-`list`, `sync` or `daemon`) exchanges `NPSSO` for an access/refresh token pair
-and writes it to `PSN_TOKEN_FILE` — by default `<PSN_OUTPUT_DIR>/.psn-token.json`,
-mode `0600`, JSON. Later runs reuse it and refresh the short-lived access token
-in place.
+You do not create this file by hand. Run `psn-captures-backup auth` once after
+setting `NPSSO`: it exchanges the NPSSO for an access/refresh token pair and
+writes it to `PSN_TOKEN_FILE` — by default `<PSN_OUTPUT_DIR>/.psn-token.json`,
+mode `0600`, JSON. `auth --check` validates an existing file instead of printing
+the token length. `list`, `sync` and `daemon` also create the file if it is
+missing, but running `auth` first surfaces credential problems immediately.
+Later runs reuse the file and refresh the short-lived access token in place.
 
 ```bash
 psn-captures-backup auth                                  # create or update the token file
@@ -160,28 +180,43 @@ Per-command flags override the environment:
 - `--output-dir PATH`
 - `--state-file PATH`
 - `--token-file PATH`
-- `--no-images` / `--no-videos` (`sync`, `list`)
+- `--no-images` / `--no-videos`
 - `--max-concurrency N`
 - `--upload-concurrency N`
 - `--upload-queue-limit N`
 - `--dry-run` (`sync`)
 - `--post-download-script PATH`
 - `--post-download-debounce-seconds N`
+- `--redownload` (`sync`; re-fetches captures already recorded in state)
 - `--flat`
 - `--json-log`
 - `--verbose`
 - `--interval N` (`daemon`)
 
-Exit codes: `0` success, `1` runtime/auth/PSN failure, `2` configuration error.
+Exit codes: `0` success; `1` auth/PSN/runtime failure, or a `sync` where any
+download failed; `2` configuration error. `daemon` keeps running through failed
+cycles and returns `0` on a clean shutdown.
 
 Typical first run:
 
 ```bash
-psn-captures-backup auth --check   # confirm the NPSSO works
+psn-captures-backup auth --check   # validate NPSSO; create/refresh the token file
 psn-captures-backup list           # see what is available
 psn-captures-backup sync           # download everything new once
 psn-captures-backup daemon         # keep it running
 ```
+
+`auth` (with or without `--check`) is the recommended first step: it writes
+`PSN_TOKEN_FILE` immediately, so the daemon reuses a known-good token instead of
+discovering a bad NPSSO on its first cycle.
+
+### Reset and force re-download
+
+- `sync --redownload` re-fetches every capture recorded in state (still limited
+  to PSN's ~14-day retention).
+- Deleting the state database forgets all history, so everything currently in
+  PSN is treated as new. It does not delete any media.
+- Deleting the token file forces a fresh NPSSO exchange; run `auth` afterwards.
 
 ## Metrics
 
@@ -225,6 +260,9 @@ Example alert conditions:
 - Captures stuck not ready: `psn_sync_captures_not_ready > 0` for 24h
 - New download failures: `increase(psn_sync_failures_total[1h]) > 0`
 
+The daemon itself logs a warning when the refresh token has less than **3 days**
+left; the example alert above fires sooner, at 2 days.
+
 The endpoint exposes only timestamps and counts — no tokens, cookies or URLs.
 It is served by `daemon`; one-shot `sync` exits before it can be scraped.
 
@@ -255,12 +293,17 @@ captures/Example Game/2025-10-11_14-30-25_psn88a578fc0d3848b1a41142f75a3d62ad.jp
 - Game titles are sanitized for filesystem safety (path separators, control
   characters, and trailing dots/spaces are replaced or trimmed). The unique
   capture id in the filename disambiguates any colliding titles.
-- `--flat` writes everything directly under `<output-dir>`.
+- `--flat` writes everything directly under `<output-dir>`. That folder also
+  holds the state database and token file by default, so point downstream tools
+  (immich-go, rclone, Jellyfin, a NAS indexer) at it only after moving both
+  elsewhere with `PSN_STATE_FILE` and `PSN_TOKEN_FILE` — or confirm the consumer
+  skips dotfiles. The token file is a secret.
 - Writes are atomic: media goes to a temporary `.part` file in the destination
   directory, is `fsync`ed, then renamed into place. Partial downloads are never
   left behind.
-- A capture already recorded in state **and** still present on disk is skipped,
-  so re-runs are idempotent. If its local file went missing, it is re-downloaded.
+- A capture recorded in state is skipped on later runs even if its local file
+  was deleted, so external cleanup (or a post-download hook) cannot trigger a
+  re-download. Pass `--redownload` to `sync` to fetch recorded captures again.
 
 ## Post-download hook
 
@@ -279,13 +322,27 @@ This is useful for downstream tools that scan a directory: a burst of captures
 can trigger one scan instead of one scan per file. The default `0` keeps the
 existing one-hook-per-download behavior.
 
-Hook batches run concurrently in a separate worker pool after state rows are
-written, so a slow hook does not prevent other captures from downloading.
+With a positive debounce, hook batches run concurrently in a separate worker
+pool after state rows are written, so a slow hook does not block downloads.
+With the default debounce `0`, the hook is submitted inline and the download
+loop waits when `PSN_UPLOAD_QUEUE_LIMIT` batches are queued or running.
 `PSN_UPLOAD_CONCURRENCY` controls how many hook batches run at once, while
-`PSN_UPLOAD_QUEUE_LIMIT` bounds queued plus running hook batches. When that
-limit is reached, the sync waits for a hook slot before accepting another batch.
-The sync command waits for all submitted hooks before exiting. Hook failures are
-logged and do not abort the sync; failed hooks are not automatically retried.
+`PSN_UPLOAD_QUEUE_LIMIT` bounds queued plus running hook batches. The sync
+command waits for all submitted hooks before exiting.
+
+Each hook invocation times out after **300 seconds**. Hook failures are logged
+and do not abort the sync; a failed or timed-out hook is not retried. Only
+captures whose *download* failed are marked `failed` and retried on the next
+poll. Keep hooks under five minutes — for slower work, return quickly and
+continue in the background.
+
+The hook exit status is recorded as a signal from your downstream tool: `0`
+marks the capture `processed` (the script succeeded), a nonzero exit or timeout
+leaves it `downloaded`. This is informational and does not assume the hook
+uploads anything; both states are skipped on later syncs because the state DB
+is the source of truth. Deleting local files after your own upload check is
+therefore safe — they will not be downloaded again unless you run
+`sync --redownload`.
 
 When PSN does not provide `sceTitleName`, the client first uses the capture's
 `title` field. For capture titles ending in an exact 14-digit timestamp, that
@@ -330,9 +387,35 @@ These are important. Read them before pointing this at your account.
    not counted as failures. See
    [docs/cloudfront-403-investigation.md](docs/cloudfront-403-investigation.md).
 5. **NPSSO expiry (~60 days).** The NPSSO cookie is short-lived. You must
-   periodically paste a fresh one; the tool logs a clear, actionable error when
-   auth fails. This is unavoidable without a full 2FA login flow, which is out of
-   scope.
+   periodically paste a fresh one. When it expires, one-shot commands exit `1`
+   and `daemon` logs auth failures until restarted with the new value (run
+   `auth` first to confirm it). This is unavoidable without a full 2FA login
+   flow, which is out of scope.
 6. **Breakage after PS App updates.** The client credentials and endpoint
    shapes could change at any PlayStation App release, which may break listing or
    downloads until this project is updated.
+7. **State is the source of truth for downloads.** Once a capture is recorded,
+   it is not fetched again even if its local file is deleted — use
+   `sync --redownload` to force a fresh copy. Deleting the state database makes
+   the tool treat every capture still in PSN's 14-day window as new.
+
+## Troubleshooting
+
+- **`unable to open database file`** — the container cannot write to the bind
+  mount. Run as the folder's owner (`user: "<uid>:<gid>"`) or
+  `chown -R 10001:10001 <folder>` (see Install).
+- **`NPSSO was rejected or has expired`** — paste a fresh NPSSO, run
+  `psn-captures-backup auth`, then restart `daemon` so it reads the new value.
+  If `auth` still fails, the NPSSO itself is invalid.
+- **`403` / `AccessDenied` / `NoSuchKey` for a video** — PSN listed the capture
+  before its transcode finished, so the MP4 does not exist yet. It is skipped as
+  "not ready" and retried on later polls; see
+  [docs/cloudfront-403-investigation.md](docs/cloudfront-403-investigation.md).
+  A capture that never becomes ready stays skipped and shows up only in
+  `psn_sync_captures_not_ready`.
+- **Hook exits nonzero or times out** — the file stays on disk with status
+  `downloaded`; hooks are not retried. Check the hook's own log, and keep it
+  under the 300-second limit.
+- **`auth --check` passes but downloads fail** — listing and token exchange are
+  fine; media authorization/availability is a separate path. Check the redacted
+  `download failed` line, then the investigation guide above.

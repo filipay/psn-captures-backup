@@ -67,7 +67,7 @@ class StateStore:
 
     def is_done(self, capture_id: str) -> bool:
         row = self.get(capture_id)
-        return row is not None and row.status == "downloaded"
+        return row is not None and row.status in ("downloaded", "processed")
 
     def record_downloaded(
         self, capture: Capture, local_path: Path, sha256: str, size: int
@@ -95,6 +95,16 @@ class StateStore:
                 now,
                 now,
             ),
+        )
+        self._conn.commit()
+
+    def record_processed(self, capture: Capture) -> None:
+        # Recorded when the post-download hook exits 0. Purely informational:
+        # both 'downloaded' and 'processed' are skipped on later syncs, whether
+        # or not the local file still exists.
+        self._conn.execute(
+            "UPDATE captures SET status = 'processed', last_attempt = ? WHERE id = ?",
+            (_now(), capture.id),
         )
         self._conn.commit()
 
