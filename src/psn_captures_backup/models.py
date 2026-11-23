@@ -46,7 +46,7 @@ def _capture_date(item: dict[str, Any]) -> datetime | None:
     try:
         # PSN's title timestamp has no timezone information. Preserve the
         # wall-clock value exactly as reported by the console.
-        return datetime.strptime(match.group(2), "%Y%m%d%H%M%S")  # noqa: DTZ007
+        return datetime.strptime(match.group(2), "%Y%m%d%H%M%S")
     except ValueError:
         return None
 
