@@ -26,6 +26,7 @@ def test_from_env_defaults() -> None:
     assert settings.upload_queue_limit == 4
     assert settings.include_images is True
     assert settings.include_videos is True
+    assert settings.redownload is False
 
 
 def test_from_env_rejects_bad_numbers() -> None:

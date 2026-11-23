@@ -108,12 +108,27 @@ def test_sync_skips_already_downloaded(tmp_path: Path) -> None:
     state.close()
 
 
-def test_sync_redownloads_when_file_missing(tmp_path: Path) -> None:
+def test_sync_skips_recorded_capture_when_file_missing(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     state = StateStore(settings.state_file)
     sync(settings, tokens=FakeTokens(), psn=FakePsn([_capture("a")]), state=state)
     (settings.output_dir / "Game" / "2025-10-11_a.jpg").unlink()
     result = sync(settings, tokens=FakeTokens(), psn=FakePsn([_capture("a")]), state=state)
+    assert result.downloaded == 0
+    assert result.skipped == 1
+    state.close()
+
+
+def test_sync_redownload_flag_forces_download(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    state = StateStore(settings.state_file)
+    sync(settings, tokens=FakeTokens(), psn=FakePsn([_capture("a")]), state=state)
+    result = sync(
+        settings.with_overrides(redownload=True),
+        tokens=FakeTokens(),
+        psn=FakePsn([_capture("a")]),
+        state=state,
+    )
     assert result.downloaded == 1
     state.close()
 
@@ -288,3 +303,88 @@ def test_sync_debounces_post_download_hooks(tmp_path: Path, monkeypatch) -> None
         "2025-10-11_b.jpg",
         "2025-10-11_c.jpg",
     }
+
+
+def _hook(tmp_path: Path, body: str) -> Path:
+    script = tmp_path / "hook.sh"
+    script.write_text(f"#!/bin/sh\n{body}\n")
+    script.chmod(0o755)
+    return script
+
+
+def test_sync_marks_processed_after_successful_hook(tmp_path: Path) -> None:
+    settings = _settings(
+        tmp_path,
+        post_download_script=_hook(tmp_path, "exit 0"),
+    )
+    state = StateStore(settings.state_file)
+    try:
+        first = sync(settings, tokens=FakeTokens(), psn=FakePsn([_capture("a")]), state=state)
+        path = settings.output_dir / "Game" / "2025-10-11_a.jpg"
+        assert first.downloaded == 1
+        assert path.exists()
+        row = state.get("a")
+        assert row is not None and row.status == "processed"
+
+        second = sync(settings, tokens=FakeTokens(), psn=FakePsn([_capture("a")]), state=state)
+        assert second.downloaded == 0
+        assert second.skipped == 1
+    finally:
+        state.close()
+
+
+def test_sync_keeps_downloaded_status_when_hook_fails(tmp_path: Path) -> None:
+    settings = _settings(
+        tmp_path,
+        post_download_script=_hook(tmp_path, "exit 1"),
+    )
+    state = StateStore(settings.state_file)
+    try:
+        result = sync(settings, tokens=FakeTokens(), psn=FakePsn([_capture("a")]), state=state)
+        assert result.downloaded == 1
+        assert (settings.output_dir / "Game" / "2025-10-11_a.jpg").exists()
+        row = state.get("a")
+        assert row is not None and row.status == "downloaded"
+    finally:
+        state.close()
+
+
+def test_sync_skips_when_hook_deleted_file(tmp_path: Path) -> None:
+    settings = _settings(
+        tmp_path,
+        post_download_script=_hook(tmp_path, 'rm -f "$@"'),
+    )
+    state = StateStore(settings.state_file)
+    try:
+        sync(settings, tokens=FakeTokens(), psn=FakePsn([_capture("a")]), state=state)
+        assert not (settings.output_dir / "Game" / "2025-10-11_a.jpg").exists()
+        row = state.get("a")
+        assert row is not None and row.status == "processed"
+
+        second = sync(settings, tokens=FakeTokens(), psn=FakePsn([_capture("a")]), state=state)
+        assert second.downloaded == 0
+        assert second.skipped == 1
+    finally:
+        state.close()
+
+
+def test_sync_debounced_hook_marks_processed(tmp_path: Path) -> None:
+    settings = _settings(
+        tmp_path,
+        post_download_script=_hook(tmp_path, "exit 0"),
+        post_download_debounce_seconds=0.05,
+    )
+    state = StateStore(settings.state_file)
+    try:
+        result = sync(
+            settings,
+            tokens=FakeTokens(),
+            psn=FakePsn([_capture("a"), _capture("b"), _capture("c")]),
+            state=state,
+        )
+        assert result.downloaded == 3
+        for name in ("a", "b", "c"):
+            row = state.get(name)
+            assert row is not None and row.status == "processed"
+    finally:
+        state.close()

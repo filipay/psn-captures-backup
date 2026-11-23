@@ -28,12 +28,15 @@ the album alone would lose that grouping.
   immich-go --version
   ```
 
+  The release, flag, and checksum details below were checked against v0.32.0 on
+  2026-11-23.
+
 - An Immich **API key** (Immich → Account Settings → API Keys) with at least:
   `asset.read`, `asset.statistics`, `asset.update`, `asset.upload`,
-  `asset.copy`, `asset.delete`, `asset.download`, `album.create`, `album.read`,
-  `albumAsset.create`, `server.about`, `stack.create`, `tag.asset`,
-  `tag.create`, `user.read`. Add `job.create` + `job.read` only if you pause
-  Immich jobs (see the `--pause-immich-jobs` note below).
+  `album.create`, `album.read`, `albumAsset.create`, `server.about`,
+  `stack.create`, `tag.asset`, `tag.create`, `user.read`. Add `job.create` +
+  `job.read` only if you pause Immich jobs (see the `--pause-immich-jobs` note
+  below).
 
 ## Configuration (keep the API key off the command line)
 
@@ -109,7 +112,11 @@ already in Immich are skipped.
 
 > `--flat` caveat: with `--flat` there are no per-game folders, so the loop has
 > nothing to iterate and there are no per-game tags to derive. Use
-> `--into-album "PlayStation Captures"` against the output root instead.
+> `--into-album "PlayStation Captures"` against the output root instead — but
+> first move the state database and token file out of that root with
+> `PSN_STATE_FILE` and `PSN_TOKEN_FILE`, or confirm the consumer ignores
+> dotfiles. The default `.psn-token.json` is a secret and must not be uploaded
+> or indexed by immich-go, rclone, Jellyfin, or a NAS scanner.
 
 ## Tag semantics: why the explicit `--tag`
 
@@ -171,6 +178,68 @@ done < "$QUEUE"
 
 The hook invokes immich-go once for each affected game folder, so ten captures
 that finish close together do not cause ten full folder scans.
+
+### Removing local files after upload
+
+There is **no built-in removal**. `processed` is only the hook's exit signal
+(`0` = the script succeeded); it does not mean "safe to delete" and the backup
+never deletes anything itself. Removal is entirely up to your hook, and is only
+safe after the upload for those specific files succeeded.
+
+Use this variant of the hook script when you want the local copies removed. It
+drops `--on-errors continue`, so a failed upload stops the script before that
+folder's files are deleted, and it only removes the files the hook was called
+with (not the rest of the game folder):
+
+```bash
+#!/bin/sh
+set -eu
+
+CONFIG=/host-immich/config/immich-go.toml
+IMMICH_GO=/host-immich/immich-go
+QUEUE=$(mktemp)
+trap 'rm -f "$QUEUE"' EXIT
+
+for file in "$@"; do
+  dirname "$file"
+done | sort -u > "$QUEUE"
+
+while IFS= read -r game_dir; do
+  [ -d "$game_dir" ] || continue
+  "$IMMICH_GO" --config "$CONFIG" --concurrent-tasks=4 \
+    upload from-folder --no-ui --pause-immich-jobs=false \
+    --into-album "PlayStation Captures" \
+    --tag "$(basename "$game_dir")" \
+    "$game_dir"
+
+  for file in "$@"; do
+    case "$file" in
+      "$game_dir"/*) rm -f -- "$file" ;;
+    esac
+  done
+done < "$QUEUE"
+```
+
+Because `set -e` aborts on a nonzero immich-go exit, no files are removed after
+a failed folder upload. Files from folders that already uploaded successfully
+may have been removed before a later folder fails; that is correct, since those
+were uploaded. Note that without `--on-errors continue` one bad asset fails the
+whole folder and keeps its files locally.
+
+When the script exits `0`, the captures are recorded as `processed`; a nonzero
+exit or timeout leaves them as `downloaded`. Both are skipped on later syncs
+because the state DB is the source of truth, so deleting files never causes a
+re-download. If you need them back, `psn-captures-backup sync --redownload`
+re-fetches recorded captures within PSN's retention window (around 14 days).
+
+Each hook invocation has a **300-second limit**. A long backlog upload can hit
+it, leaving the files in place with status `downloaded` and no automatic retry.
+For large backlogs, run the upload out-of-band and keep the hook short.
+
+Hooks only run for fresh downloads, so neither an upload that was never
+attempted nor one whose hook failed/timed out is retried by the backup. And once
+the files are deleted, Immich holds the only copy: verify a small batch before
+enabling removal, and treat upload failures as keep-the-files failures.
 
 ### Docker
 
@@ -253,11 +322,11 @@ Because dedupe is checksum-based, repeating this command is safe.
   was renamed `--server-errors` → `--on-errors` (v0.30.0); concurrency moved to
   the root command and was renamed `--concurrent-uploads` → `--concurrent-tasks`;
   config-file support landed in v0.29.0.
-- Filenames use `<YYYY-MM-DD>_<capture-id>.<ext>` when no capture timestamp is
-  available. When the PSN capture title contains an exact `YYYYMMDDHHMMSS`
-  timestamp, the filename becomes `<YYYY-MM-DD>_<HH-MM-SS>_<capture-id>.<ext>`.
-  This gives immich-go a timestamped filename fallback when the media itself
-  has no creation metadata, allowing the asset to be placed chronologically.
+- The backup's filename layout (including the timestamp fallback) is documented
+  once in the README under
+  [Output layout](../README.md#output-layout). immich-go uses the filename date
+  only when the media has no creation metadata, so assets still land
+  chronologically.
 - Immich removed `deviceAssetId`/`deviceId` in v3; dedupe is checksum-based, so
   repeated uploads of the same files are no-ops.
 - The recommended recipe has been exercised end-to-end against a live Immich

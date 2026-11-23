@@ -59,6 +59,11 @@ replaced the whole cookie set with whatever that page returned. If a page ever
 returns a subset, the other cookies were dropped. Cookies are now merged by
 name and the whole set is preserved.
 
+A video that never reaches `complete` (for example a permanently failed
+transcode) is skipped on every poll rather than failing: it has no failure count
+and is not retried more aggressively. Its only signal is the
+`psn_sync_captures_not_ready` gauge (see the README metrics table).
+
 ## Changes
 
 - `sync` leaves a video out of the run until `transcodeStatus` is `complete`
