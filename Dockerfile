@@ -16,5 +16,7 @@ COPY --from=build /usr/local/lib/python3.12/site-packages /usr/local/lib/python3
 COPY --from=build /usr/local/bin/psn-captures-backup /usr/local/bin/psn-captures-backup
 USER appuser
 VOLUME ["/captures"]
+# Optional Prometheus metrics endpoint; only listens when PSN_METRICS_ADDR is set.
+EXPOSE 9101
 ENTRYPOINT ["psn-captures-backup"]
 CMD ["daemon"]
