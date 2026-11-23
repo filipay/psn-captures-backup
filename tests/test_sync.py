@@ -80,6 +80,7 @@ def test_sync_skips_video_until_transcode_completes(tmp_path: Path) -> None:
     result = sync(settings, tokens=FakeTokens(), psn=psn, state=state)
     assert result.listed == 1
     assert result.skipped == 1
+    assert result.not_ready == 1
     assert result.failed == 0
     assert psn.downloaded == []
     state.close()

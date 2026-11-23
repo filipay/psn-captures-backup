@@ -14,6 +14,7 @@ def test_from_env_defaults() -> None:
     settings = Settings.from_env({"NPSSO": "abc", "PSN_OUTPUT_DIR": "/tmp/out"})
     assert settings.npsso == "abc"
     assert settings.output_dir == Path("/tmp/out")
+    assert settings.metrics_addr is None
     assert settings.state_file == Path("/tmp/out/.psn-captures-state.sqlite")
     assert settings.token_file == Path("/tmp/out/.psn-token.json")
     assert settings.poll_interval == 21600
@@ -50,3 +51,14 @@ def test_from_env_parses_post_download_debounce() -> None:
 def test_from_env_rejects_negative_post_download_debounce() -> None:
     with pytest.raises(ConfigError, match="PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS"):
         Settings.from_env({"NPSSO": "abc", "PSN_POST_DOWNLOAD_DEBOUNCE_SECONDS": "-1"})
+
+
+def test_from_env_parses_metrics_addr() -> None:
+    settings = Settings.from_env({"NPSSO": "abc", "PSN_METRICS_ADDR": "0.0.0.0:9101"})
+    assert settings.metrics_addr == "0.0.0.0:9101"
+
+
+def test_from_env_rejects_bad_metrics_addr() -> None:
+    with pytest.raises(ConfigError, match="PSN_METRICS_ADDR"):
+        Settings.from_env({"NPSSO": "abc", "PSN_METRICS_ADDR": "9101"})
+

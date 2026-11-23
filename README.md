@@ -115,6 +115,10 @@ psn-captures-backup auth --token-file /captures/.psn-token.json
   `/captures/.psn-token.json`) so tokens survive container restarts.
 - If the file is missing or unreadable it is recreated from `NPSSO`. If a
   refresh is rejected the tool falls back to a fresh `NPSSO` exchange.
+- The refresh token lives about **10 days** but is rotated on every refresh, so
+  a running daemon keeps it alive indefinitely. If the container is stopped for
+  longer than that, the next run needs a still-valid NPSSO. Run a sync (or the
+  daemon) at least every few days, or alert on the metric below.
 - `NPSSO` must still be set even when a valid token file exists; it is the
   fallback when the refresh token expires. Delete the file to force a fresh
   exchange, for example after changing accounts.
@@ -137,6 +141,7 @@ Environment variables (also readable from a `.env` file):
 | `PSN_INCLUDE_IMAGES` | `true` | Download screenshots. |
 | `PSN_INCLUDE_VIDEOS` | `true` | Download video clips. |
 | `PSN_LOG_LEVEL` | `INFO` | Log verbosity. |
+| `PSN_METRICS_ADDR` | — (disabled) | Serve Prometheus metrics on `HOST:PORT` from `daemon`. |
 | `PSN_POST_DOWNLOAD_SCRIPT` | — | Optional hook run after successful downloads. The hook receives one or more paths when debounce is enabled. |
 
 Precedence is CLI flag > environment/`.env` > built-in default.
@@ -177,6 +182,51 @@ psn-captures-backup list           # see what is available
 psn-captures-backup sync           # download everything new once
 psn-captures-backup daemon         # keep it running
 ```
+
+## Metrics
+
+Set `PSN_METRICS_ADDR` and publish the port to serve Prometheus metrics from
+`daemon` (disabled by default):
+
+```bash
+docker run ... -e PSN_METRICS_ADDR=0.0.0.0:9101 -p 9101:9101 psn-captures-backup:latest daemon
+```
+
+Grafana Alloy:
+
+```alloy
+prometheus.scrape "psn_captures" {
+  targets      = [{ __address__ = "psn-captures-backup:9101" }]
+  metrics_path = "/metrics"
+  forward_to   = [prometheus.remote_write.default.receiver]
+}
+```
+
+Metrics:
+
+| Metric | Meaning |
+|---|---|
+| `psn_auth_ok` | `1` when the last sync authenticated. |
+| `psn_auth_last_success_timestamp_seconds` | Last successful PSN auth. |
+| `psn_sync_last_success_timestamp_seconds` | Last successful sync. |
+| `psn_sync_captures_not_ready` | Videos skipped because their transcode is not complete. |
+| `psn_sync_failures_total` | Download failures since process start. |
+| `psn_token_file_present` | `1` if the token file is readable. |
+| `psn_token_access_expires_timestamp_seconds` | Access token expiry (epoch). |
+| `psn_token_refresh_expires_timestamp_seconds` | Refresh token expiry (epoch). |
+
+Example alert conditions:
+
+- Refresh token about to lapse / daemon stopped:
+  `time() > psn_token_refresh_expires_timestamp_seconds - 2 * 86400`
+- Auth broken: `psn_auth_ok == 0`
+- No successful sync in 2 days:
+  `time() - psn_sync_last_success_timestamp_seconds > 2 * 86400`
+- Captures stuck not ready: `psn_sync_captures_not_ready > 0` for 24h
+- New download failures: `increase(psn_sync_failures_total[1h]) > 0`
+
+The endpoint exposes only timestamps and counts — no tokens, cookies or URLs.
+It is served by `daemon`; one-shot `sync` exits before it can be scraped.
 
 ## Output layout
 

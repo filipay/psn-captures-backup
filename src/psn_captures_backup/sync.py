@@ -24,6 +24,7 @@ class SyncResult:
     downloaded: int = 0
     skipped: int = 0
     failed: int = 0
+    not_ready: int = 0
 
 
 def _wanted(capture: Capture, settings: Settings) -> bool:
@@ -184,6 +185,7 @@ def sync(
                     capture.transcode_status,
                 )
                 result.skipped += 1
+                result.not_ready += 1
                 continue
             if settings.dry_run:
                 result.skipped += 1
