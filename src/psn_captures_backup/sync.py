@@ -34,6 +34,13 @@ def _wanted(capture: Capture, settings: Settings) -> bool:
     return False
 
 
+def _media_not_ready(capture: Capture) -> bool:
+    # PSN reports the capture before its transcode produces the mp4; the
+    # downloadUrl then returns CloudFront 403 (S3 AccessDenied) until it is
+    # complete. Leave it for the next poll instead of failing the run.
+    return capture.is_video and capture.transcode_status not in (None, "complete")
+
+
 def _already_downloaded(state: StateStore, capture: Capture) -> bool:
     row = state.get(capture.id)
     return (
@@ -168,6 +175,14 @@ def sync(
             if not _wanted(capture, settings):
                 continue
             if _already_downloaded(state, capture):
+                result.skipped += 1
+                continue
+            if _media_not_ready(capture):
+                log.info(
+                    "capture %s is not ready yet (transcode=%s); retrying next poll",
+                    capture.id,
+                    capture.transcode_status,
+                )
                 result.skipped += 1
                 continue
             if settings.dry_run:

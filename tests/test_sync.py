@@ -1,4 +1,5 @@
 import time
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Lock, Thread
@@ -65,6 +66,33 @@ def test_sync_downloads_new_captures(tmp_path: Path) -> None:
     assert result.listed == 2
     assert result.downloaded == 2
     assert (settings.output_dir / "Game" / "2025-10-11_a.jpg").exists()
+    state.close()
+
+
+def test_sync_skips_video_until_transcode_completes(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    state = StateStore(settings.state_file)
+    pending = replace(
+        _capture("pending", ugc_type=2),
+        transcode_status="ready_to_transcode",
+    )
+    psn = FakePsn([pending])
+    result = sync(settings, tokens=FakeTokens(), psn=psn, state=state)
+    assert result.listed == 1
+    assert result.skipped == 1
+    assert result.failed == 0
+    assert psn.downloaded == []
+    state.close()
+
+
+def test_sync_downloads_transcoded_video(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    state = StateStore(settings.state_file)
+    ready = replace(_capture("ready", ugc_type=2), transcode_status="complete")
+    psn = FakePsn([ready])
+    result = sync(settings, tokens=FakeTokens(), psn=psn, state=state)
+    assert result.downloaded == 1
+    assert psn.downloaded == ["ready"]
     state.close()
 
 

@@ -1,8 +1,7 @@
 # Intermittent CloudFront 403s on capture downloads
 
-Investigation for issue #6. This documents what the code does, what was
-verified without a live account, the remaining hypotheses, and the diagnostics
-added so the next real run can tell the causes apart.
+Investigation for issue #6. This documents what the code does, the live
+reproduction that confirmed the cause, and the diagnostics added.
 
 ## What the API returns
 
@@ -24,24 +23,36 @@ posted in andshrew/PlayStation-Trophies#42):
 The existing field selection (`download_url`, falling back to `video_url` for
 videos; `screenshot_url` for images) matches the observed response and is kept.
 
-## Root cause status
+## Root cause status: confirmed
 
-Not confirmed: this checkout's NPSSO is expired, so the failing sync could not be
-reproduced live. The issue evidence narrows it to two causes:
+Live run on 2026-11-23 with a valid NPSSO (34 listed): 26 downloaded, 8 failed
+with HTTP 403. Every failure had:
 
-1. **Download authorization expires during a long sync.** The cookies come from
-   the initial listing; a sync of many large videos can outlive them. Requests
-   processed later then get 403 while earlier ones succeed — matching
-   "some 200, some 403 on the same hostname in one run" and the handful of
-   successes per run.
-2. **Per-capture media is missing or not ready.** CloudFront fronts an S3 origin,
-   and S3 answers a missing key with `AccessDenied` when listing is not granted,
-   which CloudFront passes through as 403. A non-complete `transcodeStatus` or
-   `transcodeError` would explain a capture that always fails.
+```
+transcode=ready_to_transcode source=s3
+cookies=CloudFront-Key-Pair-Id,CloudFront-Policy,CloudFront-Signature
+x-cache=Error from cloudfront
+body=<Error><Code>AccessDenied</Code></Error>
+```
 
-Concurrency is not a plausible cause: all workers send the same distribution
-cookies, so one capture succeeding proves the authorization path works; a
-concurrent request cannot invalidate it. The default concurrency is unchanged.
+The failures were exactly the 8 newest captures (uploaded 2026-11-22 to
+2026-11-23); the newest successful download was uploaded 2026-11-21 23:45.
+All three CloudFront cookies were present and identical across successful and
+failing requests, so this is **not** expired/invalid authorization and not
+concurrency.
+
+Cause: PSN lists a video before its transcode has produced the MP4. The
+`downloadUrl` exists but the object does not, so the S3 origin answers
+`AccessDenied` and CloudFront turns it into 403. The capture becomes
+downloadable once `transcodeStatus` reaches `complete`.
+
+The earlier "intermittent" pattern is explained: each run downloaded the
+captures that had finished transcoding and failed on the newest ones, which
+stay in `ready_to_transcode` for a while.
+
+The refresh-and-retry added for the cookie-expiry theory does not help these
+requests (there is nothing to authorize); it remains as a safeguard for genuine
+authorization expiry, and `sync` now skips non-complete videos entirely.
 
 Cookie handling had one real defect regardless of cause: each gallery page
 replaced the whole cookie set with whatever that page returned. If a page ever
@@ -50,6 +61,9 @@ name and the whole set is preserved.
 
 ## Changes
 
+- `sync` leaves a video out of the run until `transcodeStatus` is `complete`
+  (or absent), logging it as not ready and retrying on the next poll instead of
+  counting a failure. This is the fix for the observed 403s.
 - `download_to()` retries a 403 once after re-listing the gallery (limit 1) to
   refresh the CloudFront cookies. Concurrent 403s share one refresh. Other
   status codes are not retried.
@@ -79,3 +93,5 @@ name and the whole set is preserved.
 merging cookies across pages without dropping names, 403-triggered refresh and
 retry, non-403 errors not retried, URL selection and video HLS fallback, and
 redaction of signed query strings/URLs in failure diagnostics.
+`tests/test_sync.py` covers skipping a `ready_to_transcode` video and
+downloading a `complete` one.
